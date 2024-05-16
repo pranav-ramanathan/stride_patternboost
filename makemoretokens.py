@@ -476,7 +476,7 @@ def print_samples(num=10):
         print(word)
     print('-'*80)
 
-def write_samples(num=10):
+def write_samples(num=10, new_file=False):
     """ samples from the model and pretty prints the decoded samples """
     X_init = torch.zeros(num, 1, dtype=torch.long).to(args.device)
     top_k = args.top_k if args.top_k != -1 else None
@@ -494,10 +494,16 @@ def write_samples(num=10):
         samples.append(word_samp)
     out_file = args.work_dir + "/out.txt"
     print(f"Printing {len(samples)} samples to {out_file}.")
-    with open(out_file, "a") as file:
-        for word in samples:
-            file.write(word)
-            file.write("\n")
+    if not new_file:
+        with open(out_file, "a") as file:
+            for word in samples:
+                file.write(word)
+                file.write("\n")
+    else:
+        with open(out_file, "w") as file:
+            for word in samples:
+                file.write(word)
+                file.write("\n")
     
 @torch.inference_mode()
 def evaluate(model, dataset, device, batch_size=50, max_batches=None):
@@ -735,6 +741,7 @@ if __name__ == '__main__':
     if args.sample_only:
         sample_batch_size = 1000 # reduce this if GPU crashes, increase it if sampling is slow
         todo = args.sample_only
+        write_samples(num=0, new_file=True)
         while sample_batch_size < todo:
             print (f'{todo} samples remaining', end="\r")
             write_samples(num=sample_batch_size)
