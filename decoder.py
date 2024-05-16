@@ -19,8 +19,10 @@ tokenizer = Tokenizer.from_file(tokenizer_path)
 # Function to decode a single line of token ids
 def decode_tokens(token_line):
     # Remove the 'V' prefix and convert to integers
+    #print(token_line)
     token_ids = [int(token[1:]) for token in token_line.split(',')]
     # Decode the token ids to text
+    
     return tokenizer.decode(token_ids).replace(" ","")
 
 # Process the input file
@@ -29,7 +31,7 @@ if os.path.exists(args.input_file):
         tokenized_lines = file.readlines()
 
     # Decode each line and collect the results
-    decoded_text = [decode_tokens(line.strip()) for line in tokenized_lines]
+    decoded_text = [decode_tokens(line.strip()) for line in tokenized_lines if len(line) > 1]
 
     # Write the decoded text to the output file
     with open(args.output_file, 'w') as file:
