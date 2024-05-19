@@ -115,6 +115,9 @@ function create_adjacency_matrix(subsets)
     return adjmat
 end
 
+const subsets = generate_subsets(N)
+const adjacency_matrix = create_adjacency_matrix(subsets)
+
 
 function antichain_scores(adjacency_matrix, set_families)
     scores = Int[]  # Initialize an empty array to store scores for each family
@@ -292,8 +295,6 @@ end
 
 
 function reward_calc(obj::OBJ_TYPE; verbose=false)::REWARD_TYPE
-    subsets = generate_subsets(N)
-    adjacency_matrix = create_adjacency_matrix(subsets)
     families = extract_indices_from_blocks(obj)
 
     antichain_score = antichain_scores(adjacency_matrix, families)
