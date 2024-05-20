@@ -8,6 +8,8 @@ f(N): 0, 1, 3, 4, 6, 7, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 5
 
 """
 
+const N = 10
+
 function find_all_four_cycles(adjmat::Matrix{Int})
     N = size(adjmat, 1)
     four_cycles = Vector{Tuple{Int, Int, Int, Int}}()

@@ -1,101 +1,121 @@
 include("constants.jl")
 
-"""
-Best possible constructions: https://arxiv.org/pdf/1402.5646
-
-f(2) = 2
-f(3) = 4
-f(4) = 8
-f(5) = 16
-f(6) <= 30
-
-(This program works with negative scores, so the goal for K=6 is to achieve -30. It is possible with N=8, SINGLETONS_IN_A1=4, but very hard)
 
 
-"""
-
-const K = 5
-const SINGLETONS_IN_A1 = 4
-
-"""
-A0 = emptyset, Ak-1 = full set
-A1 = singletons and rest, Ak-2 = complements of A1
-k-4 families remain
-
-Every obj will consist of k-4 blocks of 2^n zeros and 1s, separated by commas
-
-Good if:
-    each Ai from i=2 to k-3 is an antichain
-    each Ai from i=2 to k-3 is saturated
-    the Ais are disjoint
-    the sequence is layered. Need to check A2->A1, A3->A2, A4->A3, ..., Ak-2->Ak-3
-
-Fixing a transformer construction:
-    Don't?
+# This file is a huge mess, sorry. Please don't try to read it.
+# Idea: A0 only contains empty set, A1 is a couple singletons and the rest
+# Ak-2 is the complement of A1, and Ak-1 is just the whole set (as in the paper)
+# Ai_small will live on level i, like in the paper
+# The program chooses A2_small, A3_small, ... Ak-3_small on their respective layers
+# We check how close this system is to being layered.
+# Each family is an antichain, since they are uniform
+# We make them saturated by including all maximal stable sets
+# Important to check that the stable sets don't overlap across families,
+# since then Lemma 15 wouldn't hold
+# Stable sets are calculated by backtracking. It runs surprisingly fast!
 
 
-"""
+# Best results I was able to achieve (N, K, SINGLETONS_IN_A1)
+# (6,6,4): 0.0233 this was the best known construction
+# (8,7,5): 0.0385
+# (8,7,6): 0.0284
+# (7,7,5): bad
+# (7,7,6): bad 
+
+# Potential parameters that could give even bigger improvements
+# K = 8, N = 9, 10, 11, Singletons = 6, 7
+# K = 9, N a bit bigger, Singletons a bit smaller than K
+
+# most important parameters to set up:
+const N::Int64 = 6
+const K::Int64 = 6
+const SINGLETONS_IN_A1 = K - 2 # Not sure this is the right value, we should try K-1, K-3 etc
 
 
+
+
+const M::Int64 = sum(binomial(N,i) for i=2:K-3)
 
 
 
 function greedy_search_from_startpoint(obj::OBJ_TYPE)::OBJ_TYPE
+    improved = true
     chars = collect(obj)
-    # Get the length of the string
-    n = length(chars)
-    # Generate 10 unique random indices within the string length
-    indices = rand(1:n, 10)
+    copy_obj = copy(chars)
+    best_rew = reward_calc(obj)
     
-    # Iterate over each index
-    for idx in indices
-        # Check if the character at the index is '0'
-        if chars[idx] == '0'
-            # Replace '0' with '1'
-            chars[idx] = '1'
+    best_obj = copy(chars)
+    while improved
+        improved = false
+        shuffled_numbers = shuffle(collect(1:M))
+        for i in shuffled_numbers
+            for j in 1:2
+                if copy_obj[i] == '1'
+                    copy_obj[i] = '0'
+                else
+                    copy_obj[i] = '1'
+                end
+                rew = reward_calc(String(copy_obj))
+                #println(rew)
+                if rew > best_rew
+                    #println(String(copy_obj), " improved to ", String(best_obj), " ", string(best_rew), "->", string(rew))
+                    best_rew = rew
+                    best_obj = copy(copy_obj)
+                    improved = true
+                    
+                end
+            end
         end
     end
+    if best_rew > 0
+        print_nicely(obj)
+    end
     
-    # Convert the character array back to a string
-    return String(chars)
+    return String(best_obj)
 end
 
 
-function extract_indices_from_blocks(input_string::String)
-    # Split the input string by commas to get the blocks of bits
-    blocks = split(input_string, ',')
-    
 
-    # Initialize a vector of vectors to store indices of ones for each block
-    indices_of_ones = Vector{Vector{Int}}()
-
-    # Iterate over each block
-    for block in blocks
-        # Check if the block length is 2^N, to ensure correct input format
-        if length(block) != 2^N
-            error("Each block must be exactly 2^N bits long.")
-        end
-
-        # Find indices where the character is '1'
-        current_indices = findall(c -> c == '1', block)
+function print_nicely(obj; to_file=true, filename="output.txt")
+    println(Int.(obj))
+    rew = reward_calc(obj; verbose=true)
+    if rew > -6
+        # Define the full filename
+        full_filename = string(rew, "_N=", N, "_K=", K, "_SIA1=", SINGLETONS_IN_A1, "_",  filename)
         
-        # Append the indices to the main list
-        push!(indices_of_ones, current_indices)
+        # Open the file in write mode
+        open(full_filename, "w") do f
+            # Redirect stdout to the file
+            redirect_stdout(f) do
+                # Call reward_calc and its output will go directly into the file
+                reward_calc(obj; verbose=true)
+            end
+        end
     end
-
-    return indices_of_ones
 end
 
 
-# Generate all subsets of the set {1, 2, ..., N}
 function generate_subsets(N)
     subsets = Vector{Vector{Int}}()
     for i = 0:(2^N - 1)
-        push!(subsets, findall(j -> (i & (1 << (j-1))) != 0, 1:N))
+        subset = findall(j -> (i & (1 << (j-1))) != 0, 1:N)
+        push!(subsets, subset)
     end
 
+    # Sorting subsets by length
+    sort!(subsets, by=length)
     return subsets
 end
+
+
+function create_subset_index_map(subsets)
+    index_map = Dict{Vector{Int}, Int}()
+    for (index, subset) in enumerate(subsets)
+        index_map[subset] = index
+    end
+    return index_map
+end
+
 
 # Create the adjacency matrix
 function create_adjacency_matrix(subsets)
@@ -116,8 +136,12 @@ function create_adjacency_matrix(subsets)
 end
 
 const subsets = generate_subsets(N)
+const subset_index_map = create_subset_index_map(subsets)
 const adjacency_matrix = create_adjacency_matrix(subsets)
 
+const subsets_big = generate_subsets(N+2)
+const subset_index_map_big = create_subset_index_map(subsets_big)
+const adjacency_matrix_big = create_adjacency_matrix(subsets_big)
 
 function antichain_scores(adjacency_matrix, set_families)
     scores = Int[]  # Initialize an empty array to store scores for each family
@@ -144,117 +168,79 @@ function antichain_scores(adjacency_matrix, set_families)
 end
 
 
-function saturation_scores(adjacency_matrix, set_families)
-    num_sets = size(adjacency_matrix, 1)
-    scores = Int[]  # Initialize an empty array to store scores for each family
+function find_maximal_stable_sets(N, family_indices)
+    maximal_sets = Int[]
+    family_indices_big = [subset_index_map_big[subsets[item]] for item in family_indices]
 
-    # Iterate over each family
-    for family in set_families
-        score = 0  # Initialize score for the current family
-
-        # Check each set outside the family
-        for potential_set in 1:num_sets
-            if potential_set in family
-                continue  # Skip if the set is already in the family
+    function backtrack(current_set::Vector{Int}, index::Int)
+        if index > N
+            # Convert current_set to index via subset_index_map for efficient checking
+            current_index = subset_index_map_big[Vector{Int}(current_set)]
+            if !any(adjacency_matrix_big[current_index, idx] == 1 for idx in maximal_sets)
+                push!(maximal_sets, current_index)
             end
-
-            # Check if this set can be added without violating saturation properties
-            is_valid = true  # Assume it can be added until proven otherwise
-
-            # Loop over all sets in the family
-            for set_in_family in family
-                if adjacency_matrix[potential_set, set_in_family] != 0 
-                    is_valid = false  # Can't add this set if it is a subset or superset of any in the family
-                    break
-                end
-            end
-
-            # Increment score if this set can be added
-            if is_valid
-                score += 1
-            end
+            return
         end
 
-        # Append the score to the scores list
-        push!(scores, score)
-    end
+        # Include the element if it does not make the set contain a forbidden subset
+        next_element_set = union(current_set, Set([index]))
 
-    return scores
-end
-
-
-# Convert an index to a subset based on binary representation
-function index_to_subset(index::Int)
-    # Subtract 1 to adjust for 1-based indexing in Julia
-    index -= 1
-
-    subset = []
-    elem = 0
-
-    # Iterate through each bit of the index
-    while index > 0
-        # Move to the next bit position
-        elem += 1
-        
-        # Check if the least significant bit is set
-        if index & 1 == 1
-            push!(subset, elem)
+        next_element_index = subset_index_map_big[Vector{Int}(next_element_set)]
+        if index >= N-1 || all(adjacency_matrix_big[family_idx, next_element_index] != 1 for family_idx in family_indices_big)
+            backtrack(next_element_set, index + 1)
         end
-        
-        # Right-shift the index to check the next bit
-        index >>= 1
+
+        # Also explore the option without including the element
+        backtrack(current_set, index + 1)
     end
 
-    return subset
-end
+    backtrack(Int[], 1)
 
-# Convert a subset to its index based on binary representation
-function subset_to_index(subset)
-    index = 0
-    for elem in subset
-        index += 1 << (elem - 1)
+    # Convert indices back to sets for final output
+    stable = [subsets_big[idx] for idx in maximal_sets]# if !any(adjacency_matrix[idx, other_idx] == 1 for other_idx in maximal_sets if idx != other_idx)]
+    stable_idx = Int[]
+    for item in stable
+        if maximum(item) <= N - 2
+            
+            push!(stable_idx, subset_index_map[item])
+        else
+            push!(stable_idx, 2^(N-2) + subset_index_map_big[item])
+        end
     end
-    return index + 1  # +1 to adjust for 1-based indexing in Julia
+    return stable_idx
 end
 
 
-function define_families(subsets)
-    A0 = [Vector{Int}()]
+
+
+function define_families()
     A1 = [findall(x -> x == i, 1:N) for i in 1:SINGLETONS_IN_A1]
-    push!(A1, collect((SINGLETONS_IN_A1+1):N))
-
-    B1 = [setdiff(1:N, s) for s in A1]
-    B0 = [collect(1:N)]
+    push!(A1, collect((SINGLETONS_IN_A1+1):N+2))
+    B1 = [setdiff(1:N+2, s) for s in A1]
 
     # Find indices
-    indices_A0 = [subset_to_index(s) for s in A0]
-    indices_A1 = [subset_to_index(s) for s in A1]
-    indices_B1 = [subset_to_index(s) for s in B1]
-    indices_B0 = [subset_to_index(s) for s in B0]
-
-    return indices_A0, indices_A1, indices_B1, indices_B0
-end
-
-
-function measure_collisions(families)
-    index_counts = Dict{Int, Int}()  # Dictionary to store the occurrence count of each index
-
-    # Count occurrences of each index across all families
-    for family in families
-        for index in family
-            if haskey(index_counts, index)
-                index_counts[index] += 1
-            else
-                index_counts[index] = 1
-            end
+    indices_A1 = Int[]
+    for s in A1
+        if maximum(s) <= N 
+            push!(indices_A1, subset_index_map[s])
+        else
+            push!(indices_A1, 2^N + subset_index_map_big[s])
+        end
+    end
+    indices_B1 = Int[]
+    for s in B1
+        if maximum(s) <= N 
+            push!(indices_B1, subset_index_map[s])
+        else
+            push!(indices_B1, 2^N + subset_index_map_big[s])
         end
     end
 
-    # Calculate collisions: sum up all counts where an index appears more than once
-    collisions = sum(value > 1 ? value - 1 : 0 for value in values(index_counts))
-
-    return collisions
+    return indices_A1, indices_B1
 end
+
+
+
 
 
 function measure_layeredness(families, adjacency_matrix)
@@ -268,13 +254,17 @@ function measure_layeredness(families, adjacency_matrix)
 
         # Check dominance condition for each element in the next family
         for x in next_family
+            
             dominated = false  # Flag to check if x is dominated by any element in current_family
-
-            # Check if there's at least one y in current_family that dominates x
-            for y in current_family
-                if adjacency_matrix[x, y] == -1
-                    dominated = true
-                    break  # Stop checking once we find a dominating element
+            if x > 2^N
+                dominated = true
+            else 
+                # Check if there's at least one y in current_family that dominates x
+                for y in current_family
+                    if y < 2^N && adjacency_matrix[x, y] == -1
+                        dominated = true
+                        break  # Stop checking once we find a dominating element
+                    end
                 end
             end
 
@@ -294,55 +284,205 @@ function measure_layeredness(families, adjacency_matrix)
 end
 
 
-function reward_calc(obj::OBJ_TYPE; verbose=false)::REWARD_TYPE
-    families = extract_indices_from_blocks(obj)
+function extract_families_from_blocks(obj)
+    families = Vector{Vector{Int}}()  # To store indices for each block
+    start_index = 1
+
+    # Loop over each size from 2 to K-3
+    for size in 2:(K-3)
+        block_size = binomial(N, size)
+        end_index = start_index + block_size - 1  # Determine the end of the current block in obj
+
+        # Collect indices of '2's in the current block
+        current_family = findall(c -> c == 2, obj[start_index:end_index])
+
+        # Adjust indices to be relative to the whole string, not just the block
+        push!(families, current_family .+ (start_index - 1 + N + 1))
+
+        # Update start_index for the next block
+        start_index = end_index + 1
+    end
+    #println(obj)
+    #println(families)
+    #exit()
+
+    return families
+end    
+        
+
+
+function reward_calc(obj_string::OBJ_TYPE; verbose=false)::REWARD_TYPE
+    obj = [c == '0' ? 1 : 2 for c in obj_string]
+    families = extract_families_from_blocks(obj)
 
     antichain_score = antichain_scores(adjacency_matrix, families)
-    saturation_score = saturation_scores(adjacency_matrix, families)
+    total = 0
+    index_counts = Dict{Int, Int}()
+    small_counter = 0
+    
+    for family in families
+        for index in family
+            if haskey(index_counts, index)
+                index_counts[index] += 1
+            else
+                index_counts[index] = 1
+            end
+            small_counter += 1
+        end
+        stable = find_maximal_stable_sets(N+2, family)
+        total += length(stable)
+        for index in stable
+            if haskey(index_counts, index)
+                index_counts[index] += 1
+            else
+                index_counts[index] = 1
+            end
+        end
+        if verbose 
+            print("Family: ")
+            println([subsets[item] for item in family])
+            print(" Stable set: ")
+            println([subsets_big[item-2^N] for item in stable])
+        end
+    end
+    big_counter = total + SINGLETONS_IN_A1 + 1 + 1
 
-    A0, A1, Akm2, Akm1 = define_families(subsets)
+    A1, Akm2 = define_families()
+    small_counter += SINGLETONS_IN_A1 + 1 + 1
+    for index in A1
+        if haskey(index_counts, index)
+            index_counts[index] += 1
+        else
+            index_counts[index] = 1
+        end
+    end
+    for index in Akm2
+        if haskey(index_counts, index)
+            index_counts[index] += 1
+        else
+            index_counts[index] = 1
+        end
+    end
     pushfirst!(families, A1)  
-    pushfirst!(families, A0)  
-    push!(families, Akm2)      
-    push!(families, Akm1) 
+    push!(families, Akm2)  
+    collisions = sum(value > 1 ? value - 1 : 0 for value in values(index_counts))
+    
 
-    collision_score = measure_collisions(families)
     layeredness_score = measure_layeredness(families, adjacency_matrix)
     #println(subsets)
 
     if verbose
         println("Reward calculation:")
+        println(index_counts)
         println(families)
         for family in families
             for item in family
-                print(index_to_subset(item))
+                if item < 2^N 
+                    print(subsets[item])
+                else
+                    print(subsets_big[item - 2^N])
+                end
                 print(", ")
             end
             println()
         end
         println("Scores:")
+        println(collisions)
         println(layeredness_score)
-        println(collision_score)
-        println(saturation_score)
         println(antichain_score)
-        println(sum(length(subvector) for subvector in families))
+        println(sum(length(subvector) for subvector in families) + total + 2) 
+        #for family in families
+        #    println(find_maximal_stable_sets(N+2, family))
+        #end
+        println()
+        println()
+        println("The final family is:\n")
+        println("A0: Only the empty set.")
+        println("A1:")
+        for item in A1
+            if item < 2^N 
+                print(subsets[item])
+            else
+                print(subsets_big[item - 2^N])
+            end
+            print(", ")
+        end
+        for i in 2:length(families)-1
+            println("\nA" * string(i) * ":")
+            for item in families[i]
+                if item < 2^N 
+                    print(subsets[item])
+                else
+                    print(subsets_big[item - 2^N])
+                end
+                print(", ")
+            end
+            print("Stable sets: ")
+            stable = find_maximal_stable_sets(N+2, families[i])
+            for item in stable 
+                if item < 2^N 
+                    print(subsets[item])
+                else
+                    print(subsets_big[item-2^N])
+                end
+                print(", ")
+            end
+            println()
+        end
+        println("\nA"*string(K-2)*":")
+        for item in Akm2
+            if item < 2^N 
+                print(subsets[item])
+            else
+                print(subsets_big[item - 2^N])
+            end
+            print(", ")
+        end
+        println()
+        println("\nA"*string(K-1)*":")
+        print("Only the entire set.\n")
+        println("\nSmall sets: " * string(small_counter) * ", big sets: " * string(big_counter))
+        println("\nTotal number of sets: " * string(sum(length(subvector) for subvector in families) + total + 2))
     end
     
+    if layeredness_score == 0 && collisions == 0 && sum(antichain_score) == 0
+        # Found a valid construction!!!
+        if max(small_counter, big_counter) >= 2^(K-2)
+            # Unfortunately this doesn't improve trivial bound
+            return 2^(K-2) - max(small_counter, big_counter)
+        else
+            # We improved the trivial bound! Let's see by how much exactly, when K goes to infitiny
+            # This can be compared across differing K and N
+            # Goal: make this number as big as possible
+            return 1 - log(2,max(small_counter, big_counter)) / (K-2)
+        end
+    end
     
-
+    return -10*(100*layeredness_score + 10*collisions  + sum(antichain_score)) - max(small_counter, big_counter) + 2^(K-2)
     
-    return -10*(300*layeredness_score + 1000*collision_score + sum(saturation_score) + sum(antichain_score)) - sum(length(subvector) for subvector in families) 
 end
 
 
 function empty_starting_point()::OBJ_TYPE
     """
     If there is no input file, the search starts always with this object
-    (E.g. empty graph, all zeros matrix, etc)
+    (e.g., empty graph, all zeros matrix, etc).
+    Creates a string of length M with all zeros and changes up to 5 random positions to ones.
     """
-    blocks = ["0"^(2^N) for _ in 1:(K-4)]
-    
-    # Join the blocks with a comma
-    result = join(blocks, ",")
-    return result
+    # Create an all-zero string of length M
+    obj_string = fill('0', M)
+
+    # Determine the number of positions to change (up to 5)
+    num_changes = rand(5:30)
+
+    # Select unique random positions to change
+    positions = randperm(M)[1:num_changes]
+
+    # Change selected positions to '1'
+    for pos in positions
+        obj_string[pos] = '1'
+    end
+
+    # Convert array of characters back to string
+    return join(obj_string)
 end

@@ -1,5 +1,6 @@
 include("constants.jl")
 
+const N = 10
 
 function find_all_triangles(adjmat::Matrix{Int})
     N = size(adjmat, 1)

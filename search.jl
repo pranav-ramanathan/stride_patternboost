@@ -11,7 +11,8 @@ using Plots
 
 #include("problem_triangle_free.jl")  
 #include("problem_4_cycle_free.jl")
-include("problem_permanent_avoid_123.jl")
+#include("problem_permanent_avoid_123.jl")
+include("problem_sperner_saturated.jl")
 
 
 #########################################################################################
@@ -62,6 +63,35 @@ function write_plot_to_file(db)
     
     # Find a filename for saving the plot
     base_name = "plot"
+    extension = "png"
+    filename = find_next_available_filename(base_name, extension)
+    
+    # Save the plot to file
+    savefig(filename)
+    println("Plot saved to $(filename)")
+
+
+    # Print the training set as well
+    cumulative_count = 0
+    filtered_rewards = []
+    filtered_counts = []
+    
+    # Filter rewards to only consider up to the best FINAL_DATABASE_SIZE objects
+    for (rew, count) in zip(rewards, reward_counts)
+        if cumulative_count >= FINAL_DATABASE_SIZE
+            break
+        end
+        next_count = min(count, FINAL_DATABASE_SIZE - cumulative_count)
+        push!(filtered_rewards, rew)
+        push!(filtered_counts, next_count)
+        cumulative_count += next_count
+    end
+
+    # Create the plot with filtered data
+    bar(filtered_rewards, filtered_counts, xlabel="Scores", ylabel="Count", title="Score Distribution", legend=false)
+    
+    # Find a filename for saving the plot
+    base_name = "plot_training"
     extension = "png"
     filename = find_next_available_filename(base_name, extension)
     

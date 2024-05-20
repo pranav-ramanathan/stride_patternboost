@@ -32,6 +32,8 @@ f(25) >= 5200384
 
 """
 
+const N = 25
+
 
 function ryser(A::AbstractMatrix)
     """computes the permanent of A using ryser with Gray ordering"""
