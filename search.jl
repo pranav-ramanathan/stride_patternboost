@@ -6,7 +6,8 @@ import StatsBase: countmap
 using Dictionaries
 using Printf
 using Plots
-
+using Combinatorics
+using Dates 
 # Choose the problem to work on here!
 
 #include("problem_triangle_free.jl")  
@@ -158,7 +159,7 @@ function local_search_on_object(db, obj)
     rewards = Vector{REWARD_TYPE}(undef, 0)
     
     
-    greedily_expanded_obj = greedy_search_from_startpoint(obj)
+    greedily_expanded_obj = greedy_search_from_startpoint(db, obj)
     rew, new = reward(db, greedily_expanded_obj)
     if new
         push!(objects, greedily_expanded_obj)
@@ -182,6 +183,13 @@ function print_db(db)
         db_size += length(db.rewards[r])
     end
     println(" - $db_size objects") 
+    # shrink database if necesary
+    if db_size > 2*TARGET_DB_SIZE
+        println(" - Shrinking database to $TARGET_DB_SIZE best objects")
+        shrink!(db)
+        rewards = [ rew for rew in keys(db.rewards) ]
+        sort!(rewards, rev=true)
+    end
     println(" - Distribution for top $nb_top rewards:")
     top_size = 0
     for r in rewards[1:min(nb_top, length(rewards))]
@@ -289,6 +297,39 @@ function add_db!(db, list_obj, list_rew = nothing)
 end
 
 
+function shrink!(db)
+    # shrinks the database to the target number of objects
+    count = 0        
+    rewards = [ rew for rew in keys(db.rewards) ]
+    sort!(rewards, rev=true) 
+    for rew in rewards
+        if count < TARGET_DB_SIZE
+            lg = length(db.rewards[rew])
+            count += lg 
+            if count > TARGET_DB_SIZE
+                k = count - TARGET_DB_SIZE
+                for obj in db.rewards[rew][lg-k+1:end]
+                    
+                    try
+                        delete!(db.objects, obj)
+                    catch e 
+                        println("whoopsie")
+                    end
+                end
+                db.rewards[rew] = db.rewards[rew][1:lg-k]
+                db.local_search_indices[rew] = min(db.local_search_indices[rew], lg-k)
+            end
+        else
+            for obj in db.rewards[rew]
+                unset!(db.objects, obj)
+            end
+            delete!(db.rewards, rew)
+            delete!(db.local_search_indices, rew)
+        end
+    end    
+    return nothing
+end
+
 function main()
     db = new_db()
     
@@ -298,13 +339,21 @@ function main()
     start_idx = 1
 
     steps::Int = 0
+    time_since_previous_output = 0
     while start_idx < length(lines)
         time_local_search = @elapsed local_search!(db, lines, start_idx)
+        time_since_previous_output += time_local_search
         start_idx += NB_LOCAL_SEARCHES
         steps += 1
         time_local_search = round(time_local_search, digits=2)
         print_db(db)
+        
         println("\nTime elapsed: local search = $time_local_search s. \n")
+        if time_since_previous_output > 2000
+            write_output_to_file(db)
+            write_plot_to_file(db)
+            time_since_previous_output = 0
+        end
     end
     print_db(db)
     write_output_to_file(db)

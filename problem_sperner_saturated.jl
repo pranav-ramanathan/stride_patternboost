@@ -1,8 +1,10 @@
+using Combinatorics
+using Dates: now, DateFormat
 include("constants.jl")
 
 
+# On Saturated k-Sperner Systems -- Natasha Morrison, Jonathan A. Noel, and Alex Scott
 
-# This file is a huge mess, sorry. Please don't try to read it.
 # Idea: A0 only contains empty set, A1 is a couple singletons and the rest
 # Ak-2 is the complement of A1, and Ak-1 is just the whole set (as in the paper)
 # Ai_small will live on level i, like in the paper
@@ -11,8 +13,12 @@ include("constants.jl")
 # Each family is an antichain, since they are uniform
 # We make them saturated by including all maximal stable sets
 # Important to check that the stable sets don't overlap across families,
-# since then Lemma 15 wouldn't hold
+# since then Lemma 15 from the paper wouldn't hold
 # Stable sets are calculated by backtracking. It runs surprisingly fast!
+
+# This reward function is a bit of a mess, sorry. Please don't try to read it.
+
+# This local search doesn't work with multithreading (see last line of greedy function), need to fix 
 
 
 # Best results I was able to achieve (N, K, SINGLETONS_IN_A1)
@@ -27,48 +33,87 @@ include("constants.jl")
 # K = 9, N a bit bigger, Singletons a bit smaller than K
 
 # most important parameters to set up:
-const N::Int64 = 6
-const K::Int64 = 6
-const SINGLETONS_IN_A1 = K - 2 # Not sure this is the right value, we should try K-1, K-3 etc
+const N::Int64 = 8
+const K::Int64 = 7
+const SINGLETONS_IN_A1 = 5 # Not sure this is the right value, we should try K-1, K-2, K-3 probably
 
 
 
 
 const M::Int64 = sum(binomial(N,i) for i=2:K-3)
 
-
-
-function greedy_search_from_startpoint(obj::OBJ_TYPE)::OBJ_TYPE
+function try_flipping_some_bits(db, best_obj, best_rew, max_flip_count; max_improvement_count=-1)
     improved = true
-    chars = collect(obj)
-    copy_obj = copy(chars)
-    best_rew = reward_calc(obj)
-    
-    best_obj = copy(chars)
-    while improved
+    copy_obj = copy(best_obj)
+    improvement_count = 0
+    objects = Vector{OBJ_TYPE}(undef, 0)
+    rewards = Vector{REWARD_TYPE}(undef, 0)
+    while improved && improvement_count!=max_improvement_count
         improved = false
-        shuffled_numbers = shuffle(collect(1:M))
-        for i in shuffled_numbers
-            for j in 1:2
-                if copy_obj[i] == '1'
-                    copy_obj[i] = '0'
-                else
-                    copy_obj[i] = '1'
+        for flip_count in 1:max_flip_count
+            all_combinations = shuffle(collect(combinations(1:length(best_obj), flip_count)))
+            for comb in all_combinations
+                # Flip the bits at the indices specified in comb
+                for index in comb
+                    copy_obj[index] = copy_obj[index] == '1' ? '0' : '1'
                 end
-                rew = reward_calc(String(copy_obj))
-                #println(rew)
+                rew, new = reward(db, String(copy_obj))
+                if new
+                    push!(objects, String(copy_obj))
+                    push!(rewards, rew)
+                end
                 if rew > best_rew
-                    #println(String(copy_obj), " improved to ", String(best_obj), " ", string(best_rew), "->", string(rew))
                     best_rew = rew
                     best_obj = copy(copy_obj)
                     improved = true
-                    
+                end
+                for index in comb
+                    copy_obj[index] = copy_obj[index] == '1' ? '0' : '1'
                 end
             end
+            copy_obj = best_obj
+        end
+        improvement_count += 1
+        #print(improvement_count)
+    end
+    #println(best_rew)
+    
+    # Can't do it like this with multithreading!!
+    add_db!(db, objects, rewards)
+
+    return best_rew, best_obj
+end
+
+function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
+    chars = collect(obj)
+    best_rew = reward_calc(obj)
+    
+    best_obj = copy(chars)
+    # Try flipping one bit in all possible ways, and keep going until reward improves
+    best_rew, best_obj = try_flipping_some_bits(db, best_obj, best_rew, 1; max_improvement_count = -1)
+
+    # Everything below makes local search better, but it's too slow for large N on my PC
+    """
+    # If reward is big, try all possible ways to flip 2 bit while we can
+    if best_rew >= -3
+        if rand() < 0.1
+            #println("Trying all double flips.")
+            best_rew, best_obj = try_flipping_some_bits(db, best_obj, best_rew, 2; max_improvement_count = 1)
         end
     end
+
+    # Occasionally try all possible 3 flips
+    if best_rew >= 0
+        if rand() < 0.01
+            println("Trying all triple flips. Let's hope this is not too slow..")
+            best_rew, best_obj = try_flipping_some_bits(db, best_obj, best_rew, 3; max_improvement_count = 1)
+        end
+    end
+    """
+    
+
     if best_rew > 0
-        print_nicely(obj)
+        print_nicely(String(best_obj))
     end
     
     return String(best_obj)
@@ -76,19 +121,23 @@ end
 
 
 
-function print_nicely(obj; to_file=true, filename="output.txt")
+
+
+function print_nicely(obj_string; to_file=true, filename="output.txt")
+    obj = [c == '0' ? 1 : 2 for c in obj_string]
     println(Int.(obj))
-    rew = reward_calc(obj; verbose=true)
+    rew = reward_calc(obj_string)
     if rew > -6
-        # Define the full filename
-        full_filename = string(rew, "_N=", N, "_K=", K, "_SIA1=", SINGLETONS_IN_A1, "_",  filename)
-        
-        # Open the file in write mode
+        timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
+        unique_id = string(threadid())  # Assuming each thread has a unique thread ID
+        directory = "constructions"
+        mkpath(directory)  # Ensure the directory exists
+
+        full_filename = joinpath(directory, string(rew, "_N=", N, "_K=", K, "_SIA1=", SINGLETONS_IN_A1, "_", unique_id, "_", timestamp, "_", filename))
+
         open(full_filename, "w") do f
-            # Redirect stdout to the file
             redirect_stdout(f) do
-                # Call reward_calc and its output will go directly into the file
-                reward_calc(obj; verbose=true)
+                reward_calc(obj_string; verbose=true)
             end
         end
     end
