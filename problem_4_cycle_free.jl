@@ -54,7 +54,7 @@ function ordered(edge::Tuple{Int, Int})::Tuple{Int, Int}
     return (edge[2], edge[1])
 end
 
-function greedy_search_from_startpoint(obj::OBJ_TYPE)::OBJ_TYPE
+function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
     """
     Main greedy search algorithm. 
     It starts and ends with some construction 
