@@ -1,9 +1,9 @@
 include("constants.jl")
 
-const K = 10
+const K = 8
 const MAX_FIRST_NUMBER = 20
 const MAX_DIFF_BETWEEN_NUMBERS = 10
-
+const PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97]
 
 
 function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
@@ -45,15 +45,27 @@ function reward_calc(obj::OBJ_TYPE)::REWARD_TYPE
     # Now the 'numbers' array contains the K-tuple.
     # All that's left is to calculate its reward.
 
-    reward = 0
+    penalty = 0
 
-    #
-    #
-    # Fill in reward calculation here
-    #
-    #
+    # We count for how many primes do we see all possible residues
 
-    return reward 
+    for prime in PRIMES
+        if length(Set([number % prime for number in numbers])) == prime
+            penalty += 1 
+        end
+        if prime > K
+            break
+        end
+    end
+
+    # The goal is to have penalty == 0, then the tuple is admissible.
+    # We want to minimize the width of the tuple
+
+    width = numbers[K] - numbers[1]
+
+    # I guess a good reward function is -width (so that we minimize the width), minus C * penalty?
+
+    return -width - 100 * penalty 
 end
 
 

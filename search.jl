@@ -13,7 +13,8 @@ using Dates
 #include("problem_triangle_free.jl")  
 #include("problem_4_cycle_free.jl")
 #include("problem_permanent_avoid_123.jl")
-include("problem_sperner_saturated.jl")
+#include("problem_sperner_saturated.jl")
+include("problem_narrow_admissible_tuples.jl")
 
 
 #########################################################################################
@@ -52,6 +53,8 @@ function write_output_to_file(db)
         
     end
     println("Data written to $(filename)")
+    println("An example of an object with maximum reward (" * string(rewards[1]) * "):")
+    println(db.rewards[rewards[1]][1])
 end
 
 function write_plot_to_file(db)
@@ -334,6 +337,8 @@ function main()
     db = new_db()
     
     lines = initial_lines()
+    println(length(lines))
+    println(length(Set(lines)))
     #add_db!(db, lines)
 
     start_idx = 1
@@ -349,7 +354,7 @@ function main()
         print_db(db)
         
         println("\nTime elapsed: local search = $time_local_search s. \n")
-        if time_since_previous_output > 2000
+        if time_since_previous_output > 8000
             write_output_to_file(db)
             write_plot_to_file(db)
             time_since_previous_output = 0
