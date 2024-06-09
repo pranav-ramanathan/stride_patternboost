@@ -396,7 +396,7 @@ def create_datasets(input_file):
     
     # wrap in dataset objects
     train_dataset = CharDataset(train_words, train_scores, chars, max_word_length)
-    test_dataset = CharDataset(test_words, train_scores, chars, max_word_length)
+    test_dataset = CharDataset(test_words, test_scores, chars, max_word_length)
 
     return train_dataset, test_dataset
 
