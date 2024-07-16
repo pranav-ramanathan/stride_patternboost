@@ -8,16 +8,16 @@ f(N): 0, 1, 3, 4, 6, 7, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 5
 
 """
 
-const N = 10
+const N = 16
 
 function find_all_four_cycles(adjmat::Matrix{Int})
     N = size(adjmat, 1)
-    four_cycles = Vector{Tuple{Int, Int, Int, Int}}()
+    four_cycles = Vector{Tuple{Int8, Int8, Int8, Int8}}()
 
     # Loop over all quadruples (a, b, c, d) where a < b < c < d
     for a in 1:N
         for b in a+1:N
-            for c in a+1:N-1
+            for c in a+1:N
                 for d in b+1:N
                     if adjmat[a, b] == 1 && adjmat[b, c] == 1 && adjmat[c, d] == 1 && adjmat[d, a] == 1
                         push!(four_cycles, (a, b, c, d))
@@ -47,12 +47,14 @@ function convert_adjmat_to_string(adjmat::Matrix{Int})::String
     return join(entries)
 end
 
-function ordered(edge::Tuple{Int, Int})::Tuple{Int, Int}
+function ordered(edge)::Tuple{Int, Int}
     if edge[1] <= edge[2]
         return edge
     end
     return (edge[2], edge[1])
 end
+
+
 
 function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
     """
@@ -85,7 +87,7 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
         edge_count = Dict()
         for (i, j, k, l) in four_cycles
             for edge in [(i, j), (j, k), (k, l), (i, l)]
-                edge_count[edge] = get(edge_count, ordered(edge), 0) + 1
+                edge_count[ordered(edge)] = get(edge_count, ordered(edge), 0) + 1
             end
         end
 
@@ -100,6 +102,7 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
 
         # Update four_cycles by removing any that contain the most frequent edge
         four_cycles = filter(t -> !(most_frequent_edge in [(t[1], t[2]), ordered((t[2], t[3])), ordered((t[3], t[4])), (t[1], t[4])]), four_cycles)
+        #println(length(four_cycles), most_frequent_edge, four_cycles)
     end
 
 
