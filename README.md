@@ -10,11 +10,11 @@ Currently the pipeline is:
 
 <b>Step 3:</b> Run the local search, packaged by 'search.jl'. If $N$ is small-ish then simply type
 ```
-  julia search.jl
+julia search.jl
 ```
 If $N$ is bigger or if you picked a problem where the local search is slow (e.g. permanent calculation) then multithreading can help:
 ```
-    julia -t 8 search.jl
+julia -t 8 search.jl
 ```
 This outputs a database whose size you specified in 'constants.jl' called 'search_results_x.txt' where x is the smallest number such that this file doesn't exist yet. It also creates a new png file containing the distribution of scores in this run.
 
