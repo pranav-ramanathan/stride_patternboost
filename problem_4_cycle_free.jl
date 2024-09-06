@@ -1,4 +1,6 @@
 include("constants.jl")
+using ArgParse
+
 
 """
 Best possible constructions: https://oeis.org/A006855/list
@@ -8,7 +10,21 @@ f(N): 0, 1, 3, 4, 6, 7, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 5
 
 """
 
-const N = 16
+function parse_args()
+    s = ArgParseSettings()
+    @add_arg_table s begin
+        "-N", "--number"
+        help = "specifies the value of N"
+        arg_type = Int
+        default = 16  # default value if -N is not provided
+    end
+    return parse_args(s)
+end
+
+args = parse_args()
+const N = get(args, :number, 16)
+
+
 
 function find_all_four_cycles(adjmat::Matrix{Int})
     N = size(adjmat, 1)
