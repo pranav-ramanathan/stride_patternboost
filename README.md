@@ -56,7 +56,7 @@ python tokenizer.py -i search_output_X.txt --use-existing-tokenizer
 
 Step 5 changes to:
 ```
-python makemoretokens.py --i search_output_1-tokenized.txt --device cuda --resume
+python makemoretokens.py --i search_output_X-tokenized.txt --device cuda --resume
 ```
 
 
