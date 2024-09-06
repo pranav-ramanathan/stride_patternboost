@@ -48,4 +48,16 @@ julia -t 4 search.jl -i transformer-output-decoded.txt
 ```
 and repeat.
 
+<b>Changes in subsequent runs:</b>
+Step 4 changes to (replace X by the most recent number)
+```
+python tokenizer.py -i search_output_X.txt --use-existing-tokenizer
+```
+
+Step 5 changes to:
+```
+python makemoretokens.py --i search_output_1-tokenized.txt --device cuda --resume
+```
+
+
 We should see in the 'Plots_x.png' files that the distribution is shifting to better and better constructions, but it will be really interesting to see the differences between problems!
