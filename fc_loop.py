@@ -206,6 +206,9 @@ def write_samples(num=10, new_file=False, use_logger=False):
     top_k = args.top_k if args.top_k != -1 else None
     steps = train_dataset.get_output_length() - 1 # -1 because we already start with <START> token (index 0)
     X_samp = generate(model, X_init, steps, top_k=top_k, do_sample=True).to('cpu')
+    n_samp =0
+    max_samp=0
+    sum_samp=0
     samples = []
 #    train_samples, test_samples, new_samples = [], [], []
     for i in range(X_samp.size(0)):
@@ -216,6 +219,10 @@ def write_samples(num=10, new_file=False, use_logger=False):
         row = row[:crop_index]
         word_samp = train_dataset.decode(row)
         samples.append(word_samp)
+    for s in samples:
+        n_samp +=1
+        sum_samp += len(s)
+        max_samp = max(max_samp, len(s))
     out_file = args.dump_path + "/out.txt"
     if use_logger:
         logger.info(f"Printing {len(samples)} samples to {out_file}.")
@@ -231,6 +238,7 @@ def write_samples(num=10, new_file=False, use_logger=False):
             for word in samples:
                 file.write(word)
                 file.write("\n")
+    return n_samp, sum_samp, max_samp
 
 
 if __name__ == '__main__':
@@ -356,18 +364,38 @@ if __name__ == '__main__':
         logger.info('generating')
         sample_batch_size = 1000 # reduce this if GPU crashes, increase it if sampling is slow
         todo = args.sample_only
-        write_samples(num=0, new_file=True)
+        tot_n = 0
+        tot_sum = 0
+        tot_max = 0
+        n, sm, mx = write_samples(num=0, new_file=True)
+        tot_n+=n
+        tot_sum+=sm
+        tot_max = max(tot_max,mx)
         while sample_batch_size < todo:
             logger.info(f'{todo} samples remaining', end="\r")
-            write_samples(num=sample_batch_size)
+            n, sm, mx = write_samples(num=sample_batch_size)
+            tot_n+=n
+            tot_sum+=sm
+            tot_max = max(tot_max,mx)
             todo = todo - sample_batch_size
-        write_samples(num=todo)
-
+        n, sm, mx = write_samples(num=todo)
+        tot_n+=n
+        tot_sum+=sm
+        tot_max = max(tot_max,mx)
+        logger.info(f"distribution of sample lengths: average: {tot_sum/tot_n if tot_n != 0 else 0} max: {tot_max}")
         logger.info('decoding')
         decode()
         logger.info(f"============ End of generation {generation} ============")
         logger.info(f"launching search.jl")
         subprocess.run(["julia","search_fc.jl", args.dump_path, str(args.nb_local_searches), str(args.num_initial_empty_objects), str(args.final_database_size), str(args.target_db_size),'-i',args.dump_path+'/transformer-output-decoded.txt'])
+        if os.path.exists(args.dump_path+"/distribution.txt"):
+            with open(args.dump_path+"/distribution.txt", 'r') as file:
+                d_lines = file.readlines()
+        logger.info("distribution of scores")
+        for l in d_lines:
+            logger.info(l)
+
+        
         logger.info("tokenizing")
         tokenize(f"{args.dump_path}/search_output_{generation+1}.txt", 100)
         input_file = args.dump_path + f"/search_output_{generation+1}-tokenized.txt"
