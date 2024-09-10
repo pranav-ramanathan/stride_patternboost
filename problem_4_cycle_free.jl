@@ -16,13 +16,13 @@ function parse_args()
         "-N", "--number"
         help = "specifies the value of N"
         arg_type = Int
-        default = 16  # default value if -N is not provided
+        default = 20  # default value if -N is not provided
     end
     return parse_args(s)
 end
 
 args = parse_args()
-const N = get(args, :number, 16)
+const N = get(args, :number, 20)
 
 
 

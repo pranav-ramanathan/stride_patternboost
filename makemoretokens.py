@@ -24,7 +24,9 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from logging import getLogger
 
+logger=getLogger()
 # -----------------------------------------------------------------------------
 
 @dataclass
@@ -476,7 +478,7 @@ def print_samples(num=10):
         print(word)
     print('-'*80)
 
-def write_samples(num=10, new_file=False):
+def write_samples(num=10, new_file=False, use_logger=False):
     """ samples from the model and pretty prints the decoded samples """
     X_init = torch.zeros(num, 1, dtype=torch.long).to(args.device)
     top_k = args.top_k if args.top_k != -1 else None
@@ -493,7 +495,10 @@ def write_samples(num=10, new_file=False):
         word_samp = train_dataset.decode(row)
         samples.append(word_samp)
     out_file = args.work_dir + "/out.txt"
-    print(f"Printing {len(samples)} samples to {out_file}.")
+    if use_logger:
+        logger.info(f"Printing {len(samples)} samples to {out_file}.")
+    else: 
+        print(f"Printing {len(samples)} samples to {out_file}.")
     if not new_file:
         with open(out_file, "a") as file:
             for word in samples:
