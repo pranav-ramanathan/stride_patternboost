@@ -76,7 +76,7 @@ function write_plot_to_file(db)
     println("Plot saved to $(filename)")
 
     # Create the .txt file and write the score distribution
-    txt_filename = find_next_available_filename("distribution", "txt")
+    txt_filename = filename = @sprintf("%s/%s.%s", write_path, "distribution", "txt")
     open(txt_filename, "w") do f
         for (rew, count) in zip(rewards, reward_counts)
             println(f, "Score: $rew, Count: $count")
@@ -113,7 +113,7 @@ function write_plot_to_file(db)
     println("Plot saved to $(filename)")
 
     # Create the .txt file for the filtered data
-    txt_filename = find_next_available_filename("training_distribution", "txt")
+    txt_filename = @sprintf("%s/%s.%s", write_path, "training_distribution", "txt")
     open(txt_filename, "w") do f
         for (rew, count) in zip(filtered_rewards, filtered_counts)
             println(f, "Score: $rew, Count: $count")
