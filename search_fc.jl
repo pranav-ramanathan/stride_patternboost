@@ -372,7 +372,7 @@ function main()
         time_local_search = round(time_local_search, digits=2)
         print_db(db)
         
-        println("\nTime elapsed: local search = $time_local_search s. \n")
+        #println("\nTime elapsed: local search = $time_local_search s. \n")
         if time_since_previous_output > 8000
             write_output_to_file(db)
             write_plot_to_file(db)

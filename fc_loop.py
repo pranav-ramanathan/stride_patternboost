@@ -372,7 +372,7 @@ if __name__ == '__main__':
         tot_sum+=sm
         tot_max = max(tot_max,mx)
         while sample_batch_size < todo:
-            logger.info(f'{todo} samples remaining', end="\r")
+            logger.info(f'{todo} samples remaining')
             n, sm, mx = write_samples(num=sample_batch_size)
             tot_n+=n
             tot_sum+=sm
