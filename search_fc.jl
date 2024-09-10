@@ -75,6 +75,14 @@ function write_plot_to_file(db)
     savefig(filename)
     println("Plot saved to $(filename)")
 
+    # Create the .txt file and write the score distribution
+    txt_filename = find_next_available_filename("distribution", "txt")
+    open(txt_filename, "w") do f
+        for (rew, count) in zip(rewards, reward_counts)
+            println(f, "Score: $rew, Count: $count")
+        end
+    end
+    println("Score distribution saved to $(txt_filename)")
 
     # Print the training set as well
     cumulative_count = 0
@@ -103,7 +111,17 @@ function write_plot_to_file(db)
     # Save the plot to file
     savefig(filename)
     println("Plot saved to $(filename)")
+
+    # Create the .txt file for the filtered data
+    txt_filename = find_next_available_filename("training_distribution", "txt")
+    open(txt_filename, "w") do f
+        for (rew, count) in zip(filtered_rewards, filtered_counts)
+            println(f, "Score: $rew, Count: $count")
+        end
+    end
+    println("Filtered score distribution saved to $(txt_filename)")
 end
+
 
 
 function new_db()
