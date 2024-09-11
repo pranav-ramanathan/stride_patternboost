@@ -367,10 +367,14 @@ if __name__ == '__main__':
         tot_n = 0
         tot_sum = 0
         tot_max = 0
-        n, sm, mx = write_samples(num=0, new_file=True)
-        tot_n+=n
-        tot_sum+=sm
-        tot_max = max(tot_max,mx)
+        out_file = args.work_dir + "/out.txt"
+        with open(args.input_file, 'r') as f:
+            data = f.read()
+        words = data.splitlines()
+        with open(out_file, "w") as file:
+            for word in words:
+                file.write(word)
+                file.write("\n")
         while sample_batch_size < todo:
             logger.info(f'{todo} samples remaining')
             n, sm, mx = write_samples(num=sample_batch_size)
