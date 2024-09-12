@@ -22,7 +22,7 @@ f(N): 0, 1, 3, 4, 6, 7, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 5
 #end
 
 #args = parse_args()
-const N = 20 #get(args, :number, 20)
+const N = 33 #get(args, :number, 20)
 
 
 
