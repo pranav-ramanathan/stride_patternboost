@@ -183,6 +183,7 @@ function local_search_on_object(db, obj)
     
     greedily_expanded_objs = greedy_search_from_startpoint(db, obj)
     for greedily_expanded_obj in greedily_expanded_objs
+        
         rew, new = reward(db, greedily_expanded_obj)
         if new
             push!(objects, greedily_expanded_obj)

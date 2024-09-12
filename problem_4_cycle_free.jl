@@ -1,5 +1,4 @@
 include("constants.jl")
-using Random
 using ArgParse
 
 
@@ -73,7 +72,7 @@ end
 
 
 
-function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::OBJ_TYPE
+function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::Vector{OBJ_TYPE}
     """
     Main greedy search algorithm. 
     It starts and ends with some construction 
@@ -164,7 +163,7 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::O
     end
 
 
-    return [convert_adjmat_to_string(adjmat) for adjmat in permuted_adjmats]
+    return [convert_adjmat_to_string(permuted_adjmat) for permuted_adjmat in permuted_adjmats]
 end
 
 function reward_calc(obj::OBJ_TYPE)::REWARD_TYPE
