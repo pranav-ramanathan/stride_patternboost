@@ -22,7 +22,7 @@ f(N): 0, 1, 3, 4, 6, 7, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 5
 #end
 
 #args = parse_args()
-const N = 33 #get(args, :number, 20)
+const N = 20 #get(args, :number, 20)
 
 
 
@@ -72,7 +72,7 @@ end
 
 
 
-function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
+function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::OBJ_TYPE
     """
     Main greedy search algorithm. 
     It starts and ends with some construction 
@@ -153,7 +153,17 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::OBJ_TYPE
         end
         allowed_edges = new_allowed_edges
     end
-    return convert_adjmat_to_string(adjmat)
+
+    # Now that we have 'adjmat', sample four random permutations
+    permuted_adjmats = []
+    for _ in 1:4
+        perm = randperm(N)  # Generate a random permutation
+        permuted_adjmat = adjmat[perm, perm]  # Apply the permutation to rows and columns
+        push!(permuted_adjmats, permuted_adjmat)
+    end
+
+
+    return [convert_adjmat_to_string(adjmat) for adjmat in permuted_adjmats]
 end
 
 function reward_calc(obj::OBJ_TYPE)::REWARD_TYPE

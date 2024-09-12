@@ -181,11 +181,13 @@ function local_search_on_object(db, obj)
     rewards = Vector{REWARD_TYPE}(undef, 0)
     
     
-    greedily_expanded_obj = greedy_search_from_startpoint(db, obj)
-    rew, new = reward(db, greedily_expanded_obj)
-    if new
-        push!(objects, greedily_expanded_obj)
-        push!(rewards, rew)
+    greedily_expanded_objs = greedy_search_from_startpoint(db, obj)
+    for greedily_expanded_obj in greedily_expanded_objs
+        rew, new = reward(db, greedily_expanded_obj)
+        if new
+            push!(objects, greedily_expanded_obj)
+            push!(rewards, rew)
+        end
     end
     return objects, rewards
 end
