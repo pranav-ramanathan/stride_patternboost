@@ -1,4 +1,5 @@
 include("constants.jl")
+using Random
 using ArgParse
 
 
