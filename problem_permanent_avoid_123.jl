@@ -132,7 +132,7 @@ function find_all_312s(points)
 end
 
 
-function greedy_search_from_startpoint(obj::OBJ_TYPE)::OBJ_TYPE
+function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::Vector{OBJ_TYPE}
     points = Vector{Tuple{Int64, Int64}}(undef, 0)
     
     counter::Int64 = 1
@@ -211,7 +211,7 @@ function greedy_search_from_startpoint(obj::OBJ_TYPE)::OBJ_TYPE
         counter += 1
     end
 
-    return convert_matrix_to_string(adjmat)
+    return [convert_matrix_to_string(adjmat)]
 end
 
 function reward_calc(obj::OBJ_TYPE)::REWARD_TYPE

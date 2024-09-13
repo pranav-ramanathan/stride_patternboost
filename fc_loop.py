@@ -26,10 +26,10 @@ def get_parser():
     parser = argparse.ArgumentParser('Generate training sample of low braids via reservoir sampling')
     # JULIA params
     parser.add_argument('--nb_local_searches', type=int, default=1200, help='N')
-    parser.add_argument('--num_initial_empty_objects', type=int, default=200000, help='N')
-    parser.add_argument('--final_database_size', type=int, default=50000, help='N')
-    parser.add_argument('--target_db_size', type=int, default=500000, help='N')
-    parser.add_argument('--sample-only', type=int, default=500000, help="sample the specified number from the model")
+    parser.add_argument('--num_initial_empty_objects', type=int, default=1000000, help='N')
+    parser.add_argument('--final_database_size', type=int, default=100000, help='training set size')
+    parser.add_argument('--target_db_size', type=int, default=200000, help='size of cache during local search loop')
+    parser.add_argument('--sample-only', type=int, default=100000, help="sample the specified number from the model")
     
 
     # Makemore params

@@ -154,6 +154,7 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::V
         allowed_edges = new_allowed_edges
     end
 
+
     # Now that we have 'adjmat', sample four random permutations
     permuted_adjmats = []
     for _ in 1:4
