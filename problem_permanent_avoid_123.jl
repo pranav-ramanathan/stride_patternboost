@@ -32,7 +32,7 @@ f(25) >= 5200384
 
 """
 
-const N = 25
+const N = 10
 
 
 function ryser(A::AbstractMatrix)

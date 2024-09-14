@@ -26,16 +26,16 @@ def get_parser():
     parser = argparse.ArgumentParser('Generate training sample of low braids via reservoir sampling')
     # JULIA params
     parser.add_argument('--nb_local_searches', type=int, default=1200, help='N')
-    parser.add_argument('--num_initial_empty_objects', type=int, default=1000000, help='N')
-    parser.add_argument('--final_database_size', type=int, default=100000, help='training set size')
-    parser.add_argument('--target_db_size', type=int, default=200000, help='size of cache during local search loop')
-    parser.add_argument('--sample-only', type=int, default=100000, help="sample the specified number from the model")
+    parser.add_argument('--num_initial_empty_objects', type=int, default=20000, help='N')
+    parser.add_argument('--final_database_size', type=int, default=20000, help='training set size')
+    parser.add_argument('--target_db_size', type=int, default=20000, help='size of cache during local search loop')
+    parser.add_argument('--sample-only', type=int, default=50000, help="sample the specified number from the model")
     
 
     # Makemore params
     parser.add_argument('--num-workers', '-n', type=int, default=8, help="number of data workers for both train/test")
     parser.add_argument('--max-steps', type=int, default=10000, help="max number of optimization steps to run for, or -1 for infinite.")
-    parser.add_argument('--max_epochs', type=int, default= 1000, help='number of epochs')
+    parser.add_argument('--max_epochs', type=int, default= 50000, help='number of epochs')
     parser.add_argument('--seed', type=int, default=-1, help="seed")
     # sampling
     parser.add_argument('--top-k', type=int, default=-1, help="top-k for sampling, -1 means no top-k")
@@ -52,12 +52,12 @@ def get_parser():
     # evaluation against known "good sequences"
     parser.add_argument('--max-output-length', type=int, default=120, help="maximum output length")
     parser.add_argument('--gen_batch_size', type=int, default=1000, help="generation batch size")
-    parser.add_argument('--n_tokens', type=int, default=100, help="nr tokens in tokenizer")
+    parser.add_argument('--n_tokens', type=int, default=10, help="nr tokens in tokenizer")
     parser.add_argument('--temperature', type=float, default=1.0, help="temperature")
     
 
     # path and ports
-    parser.add_argument("--dump_path", type=str, default="/checkpoint/fcharton/dumped",
+    parser.add_argument("--dump_path", type=str, default="checkpoint",
                         help="Experiment dump path")
     parser.add_argument("--exp_name", type=str, default="debug",
                         help="Experiment name")
