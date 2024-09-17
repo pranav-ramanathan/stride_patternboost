@@ -26,33 +26,34 @@ def get_parser():
     parser = argparse.ArgumentParser('Generate training sample of low braids via reservoir sampling')
     # JULIA params
     parser.add_argument('--nb_local_searches', type=int, default=1200, help='N')
-    parser.add_argument('--num_initial_empty_objects', type=int, default=20000, help='N')
-    parser.add_argument('--final_database_size', type=int, default=20000, help='training set size')
-    parser.add_argument('--target_db_size', type=int, default=20000, help='size of cache during local search loop')
-    parser.add_argument('--sample-only', type=int, default=50000, help="sample the specified number from the model")
+    parser.add_argument('--num_initial_empty_objects', type=int, default=200000, help='N')
+    parser.add_argument('--final_database_size', type=int, default=200000, help='training set size')
+    parser.add_argument('--target_db_size', type=int, default=200000, help='size of cache during local search loop')
+    parser.add_argument('--sample-only', type=int, default=100000, help="sample the specified number from the model")
+    parser.add_argument('--nb_threads', type=int, default=1, help='Number of cpu threads')
     
 
     # Makemore params
     parser.add_argument('--num-workers', '-n', type=int, default=8, help="number of data workers for both train/test")
-    parser.add_argument('--max-steps', type=int, default=10000, help="max number of optimization steps to run for, or -1 for infinite.")
-    parser.add_argument('--max_epochs', type=int, default= 50000, help='number of epochs')
+    parser.add_argument('--max-steps', type=int, default=20000, help="max number of optimization steps to run for, or -1 for infinite.")
+    parser.add_argument('--max_epochs', type=int, default= 30000, help='number of epochs')
     parser.add_argument('--seed', type=int, default=-1, help="seed")
     # sampling
     parser.add_argument('--top-k', type=int, default=-1, help="top-k for sampling, -1 means no top-k")
     # model
     parser.add_argument('--type', type=str, default='transformer', help="model class type to use, bigram|mlp|rnn|gru|bow|transformer")
     parser.add_argument('--n-layer', type=int, default=4, help="number of layers")
-    parser.add_argument('--n-head', type=int, default=4, help="number of heads (in a transformer)")
-    parser.add_argument('--n-embd', type=int, default=16, help="number of feature channels in the model")
-    parser.add_argument('--n-embd2', type=int, default=16, help="number of feature channels elsewhere in the model")
+    parser.add_argument('--n-head', type=int, default=8, help="number of heads (in a transformer)")
+    parser.add_argument('--n-embd', type=int, default=64, help="number of feature channels in the model")
+    parser.add_argument('--n-embd2', type=int, default=32, help="number of feature channels elsewhere in the model")
     # optimization
     parser.add_argument('--batch-size', '-b', type=int, default=32, help="batch size during optimization")
     parser.add_argument('--learning-rate', '-l', type=float, default=5e-4, help="learning rate")
     parser.add_argument('--weight-decay', '-w', type=float, default=0.01, help="weight decay")
     # evaluation against known "good sequences"
-    parser.add_argument('--max-output-length', type=int, default=120, help="maximum output length")
+    parser.add_argument('--max-output-length', type=int, default=160, help="maximum output length")
     parser.add_argument('--gen_batch_size', type=int, default=1000, help="generation batch size")
-    parser.add_argument('--n_tokens', type=int, default=10, help="nr tokens in tokenizer")
+    parser.add_argument('--n_tokens', type=int, default=100, help="nr tokens in tokenizer")
     parser.add_argument('--temperature', type=float, default=1.0, help="temperature")
     
 
@@ -271,6 +272,8 @@ if __name__ == '__main__':
             break
     initial_gen = i-1
     if initial_gen == 0:
+        os.environ["JULIA_NUM_THREADS"] = str(args.nb_threads)  # Set the environment variable
+        logger.info(f"JULIA_NUM_THREADS is set to {os.environ['JULIA_NUM_THREADS']}")
         subprocess.run(["julia","search_fc.jl", args.dump_path, str(args.nb_local_searches), str(args.num_initial_empty_objects), str(args.final_database_size), str(args.target_db_size)])
         tokenize(f"{args.dump_path}/search_output_1.txt", args.n_tokens)
         initial_gen = 1
@@ -334,12 +337,22 @@ if __name__ == '__main__':
             X, Y = batch
 
             # feed into the model
-            logits, loss = model(X, Y)
+            try:
+                logits, loss = model(X, Y)
+                # calculate the gradient, update the weights
+                model.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
 
-            # calculate the gradient, update the weights
-            model.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            except RuntimeError as e:
+                logger.info("Caught RuntimeError during forward pass.")
+                logger.info(f"Shape of x before error: {X.shape}")
+                logger.info(f"Shape of y before error: {Y.shape}")
+                logger.info(f"Shape of logits (if calculated): {logits.shape if 'logits' in locals() else 'Not calculated'}")
+
+                #raise e
+
+            
 
             # wait for all CUDA work on the GPU to finish then calculate iteration time taken
             if args.device =="cuda":
@@ -403,7 +416,10 @@ if __name__ == '__main__':
         logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
         logger.info(f"============ End of generation {generation} ============")
         logger.info(f"launching search.jl")
-        subprocess.run(["julia","search_fc.jl", args.dump_path, str(args.nb_local_searches), str(args.num_initial_empty_objects), str(args.final_database_size), str(args.target_db_size),'-i',args.dump_path+'/transformer-output-decoded.txt'])
+        os.environ["JULIA_NUM_THREADS"] = str(args.nb_threads)  # Set the environment variable
+        logger.info(f"JULIA_NUM_THREADS is set to {os.environ['JULIA_NUM_THREADS']}")
+
+        subprocess.run(["julia", "search_fc.jl", args.dump_path, str(args.nb_local_searches), str(args.num_initial_empty_objects), str(args.final_database_size), str(args.target_db_size), '-i', args.dump_path + '/transformer-output-decoded.txt'])
         if os.path.exists(args.dump_path+"/distribution.txt"):
             with open(args.dump_path+"/distribution.txt", 'r') as file:
                 d_lines = file.readlines()

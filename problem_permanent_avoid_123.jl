@@ -32,7 +32,7 @@ f(25) >= 5200384
 
 """
 
-const N = 10
+const N = 16
 
 
 function ryser(A::AbstractMatrix)
@@ -105,6 +105,7 @@ function convert_matrix_to_string(adjmat::Matrix{Int8})::String
         for j in 1:N
             push!(entries, string(adjmat[i, j]))
         end
+        push!(entries, ",")
     end
 
     # Join all entries into a single string
@@ -134,9 +135,16 @@ end
 
 function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::Vector{OBJ_TYPE}
     points = Vector{Tuple{Int64, Int64}}(undef, 0)
+    num_commas = count(c -> c == ',', obj)
+    if num_commas != N 
+        return greedy_search_from_startpoint(db, empty_starting_point())
+    end
     
     counter::Int64 = 1
     for (i,j) in POINT_SET::Vector{Tuple{Int64, Int64}} 
+        while obj[counter] == ","
+            counter += 1
+        end
         if obj[counter] == '1'
             append!(points,[(i,j)])
         end

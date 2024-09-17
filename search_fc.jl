@@ -8,11 +8,12 @@ using Printf
 using Plots
 using Combinatorics
 using Dates 
+
 # Choose the problem to work on here!
 
 #include("problem_triangle_free.jl")  
-#include("problem_4_cycle_free.jl")
-include("problem_permanent_avoid_123.jl")
+include("problem_4_cycle_free.jl")
+#include("problem_permanent_avoid_123.jl")
 #include("problem_sperner_saturated.jl")
 
 
@@ -20,7 +21,11 @@ include("problem_permanent_avoid_123.jl")
 
 include("constants.jl")
 
+if Threads.nthreads() > 1 
+    BLAS.set_num_threads(1)   # this seems to help a bit
+end
 
+println("Using ", nthreads(), " thread(s)")
 
 function find_next_available_filename(base::String, extension::String)
     i = 1
@@ -361,6 +366,9 @@ function main()
     lines = initial_lines()
     println(length(lines))
     println(length(Set(lines)))
+    print("Using ")
+    print(nthreads())
+    println(" threads")
     #add_db!(db, lines)
 
     start_idx = 1

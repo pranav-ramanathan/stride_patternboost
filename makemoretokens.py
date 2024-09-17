@@ -26,6 +26,8 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from logging import getLogger
 
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 logger=getLogger()
 # -----------------------------------------------------------------------------
 

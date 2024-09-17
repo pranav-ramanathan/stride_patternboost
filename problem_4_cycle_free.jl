@@ -22,7 +22,7 @@ f(N): 0, 1, 3, 4, 6, 7, 9, 11, 13, 16, 18, 21, 24, 27, 30, 33, 36, 39, 42, 46, 5
 #end
 
 #args = parse_args()
-const N = 20 #get(args, :number, 20)
+const N = 33 #get(args, :number, 20)
 
 
 
@@ -57,6 +57,7 @@ function convert_adjmat_to_string(adjmat::Matrix{Int})::String
         for j in i+1:N
             push!(entries, string(adjmat[i, j]))
         end
+        push!(entries,",")
     end
 
     # Join all entries into a single string
@@ -81,6 +82,10 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::V
     Greedily remove edges to destroy all triangles, then greedily add edges without creating triangles
     Returns final maximal triangle-free graph
     """
+    num_commas = count(c -> c == ',', obj)
+    if num_commas != N - 1
+        return greedy_search_from_startpoint(db, empty_starting_point())
+    end
 
     adjmat = zeros(Int, N, N)
 
@@ -88,6 +93,10 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::V
     index = 1
     for i in 1:N-1
         for j in i+1:N
+            while obj[index] == ','
+                index += 1
+            end
+            #println(obj[index])
             adjmat[i, j] = parse(Int, obj[index])  # Convert character to integer
             adjmat[j, i] = adjmat[i, j]  # Make the matrix symmetric
             index += 1
@@ -154,6 +163,8 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE, additional_loops=0)::V
         allowed_edges = new_allowed_edges
     end
 
+    return [convert_adjmat_to_string(adjmat)]
+
 
     # Now that we have 'adjmat', sample four random permutations
     permuted_adjmats = []
@@ -181,5 +192,8 @@ function empty_starting_point()::OBJ_TYPE
     If there is no input file, the search starts always with this object
     (E.g. empty graph, all zeros matrix, etc)
     """
-    return "0" ^ (N * (N - 1) ÷ 2 )
+
+    adjmat = zeros(Int, N, N)
+
+    return convert_adjmat_to_string(adjmat)
 end
