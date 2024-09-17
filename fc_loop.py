@@ -58,7 +58,7 @@ def get_parser():
     
 
     # path and ports
-    parser.add_argument("--dump_path", type=str, default="checkpoint",
+    parser.add_argument("--dump_path", type=str, default="/checkpoint/fcharton/dumped",
                         help="Experiment dump path")
     parser.add_argument("--exp_name", type=str, default="debug",
                         help="Experiment name")
