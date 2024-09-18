@@ -57,7 +57,7 @@ function convert_adjmat_to_string(adjmat::Matrix{Int})::String
         for j in i+1:N
             push!(entries, string(adjmat[i, j]))
         end
-        push!(entries,",")
+        push!(entries,"2")
     end
 
     # Join all entries into a single string
