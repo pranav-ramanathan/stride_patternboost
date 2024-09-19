@@ -281,7 +281,7 @@ if __name__ == '__main__':
     logger.info(f"initializing at generation: {initial_gen}")
     input_file = args.dump_path + f"/search_output_{initial_gen}-tokenized.txt"
     train_dataset, test_dataset = create_datasets(input_file)
-    vocab_size = train_dataset.get_vocab_size()
+    vocab_size = args.n_tokens + 1
     block_size = args.max_output_length + 1
     logger.info(f"dataset determined that: {vocab_size=}, {block_size=}")
 
