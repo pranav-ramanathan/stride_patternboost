@@ -100,7 +100,7 @@ def tokenize(input_file_path, n_tokens):
         logger.info(f'Created {destination_file_path} and training tokenizer...')
         # Reading the first 100,000 lines from the source file and training the tokenizer on them
         with open(source_file_path, 'r') as source_file, open(destination_file_path, 'w') as destination_file:
-            for i in range(100_000):
+            for i in range(5_000):
                 line = source_file.readline()
                 if not line:
                     break
