@@ -384,11 +384,7 @@ function main()
         print_db(db)
         
         #println("\nTime elapsed: local search = $time_local_search s. \n")
-        if time_since_previous_output > 8000
-            write_output_to_file(db)
-            write_plot_to_file(db)
-            time_since_previous_output = 0
-        end
+        
     end
     print_db(db)
     write_output_to_file(db)
