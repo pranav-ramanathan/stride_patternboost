@@ -12,8 +12,8 @@ The project’s goal is to provide mathematicians with an accessible tool that b
 ## Installation
 
 ### Prerequisites
-- Python 3.8+
-- Julia 1.6+
+- Python 3.10+
+- Julia 1.8+
 
 ### Setup
 1. Clone the repository:
