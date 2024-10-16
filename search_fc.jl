@@ -14,7 +14,6 @@ using Dates
 #include("problem_triangle_free.jl")  
 include("problem_4_cycle_free.jl")
 #include("problem_permanent_avoid_123.jl")
-#include("problem_sperner_saturated.jl")
 
 
 #########################################################################################
@@ -167,6 +166,7 @@ function initial_lines()
 end
 
 
+# The below functions are a modification of a local search code originally written by Gwenael Joret
 
 function reward(obj)
     return reward_calc(obj)
@@ -180,15 +180,10 @@ function reward(db, obj)
 end
 
 function local_search_on_object(db, obj)
-    # naive version of local search on object  
-    # allows for multiple rollouts from a single starting point 
     objects = Vector{OBJ_TYPE}(undef, 0)
-    rewards = Vector{REWARD_TYPE}(undef, 0)
-    
-    
+    rewards = Vector{REWARD_TYPE}(undef, 0) 
     greedily_expanded_objs = greedy_search_from_startpoint(db, obj)
-    for greedily_expanded_obj in greedily_expanded_objs
-        
+    for greedily_expanded_obj in greedily_expanded_objs      
         rew, new = reward(db, greedily_expanded_obj)
         if new
             push!(objects, greedily_expanded_obj)
@@ -200,42 +195,20 @@ end
 
 
 function print_db(db)
-    nb_top = 20
-    # println("Database:")
     rewards = [ rew for rew in keys(db.rewards) ]
     sort!(rewards, rev=true)
-    max_size_for_r = 5
     db_size = 0
     for r in rewards 
-        r_round = round(r, digits=4)
-        s = "$r_round:"
-        max_size_for_r = max(max_size_for_r, sizeof(s))
         db_size += length(db.rewards[r])
     end
-    # println(" - $db_size objects") 
-    # shrink database if necesary
+    # shrink database if necessary
     if db_size > 2*target_db_size
         println(" - Shrinking database to $target_db_size best objects")
         shrink!(db)
         rewards = [ rew for rew in keys(db.rewards) ]
         sort!(rewards, rev=true)
-    end
-    # println(" - Distribution for top $nb_top rewards:")
-    top_size = 0
-    for r in rewards[1:min(nb_top, length(rewards))]
-        top_size += length(db.rewards[r])
-    end
-    for r in rewards[1:min(nb_top, length(rewards))]
-        length_line = 75                
-        multiplicity = length(db.rewards[r])
-        num = Int(round( (multiplicity/top_size )*length_line ))
-        r_round = round(r, digits=4)
-        pad = repeat(" ", max_size_for_r - sizeof("$r_round"))
-        s = "$r_round:" * pad * "[" * repeat("=", num) * repeat(".", length_line - num) * "] $multiplicity"
-        # println(s)
-    end     
+    end  
 end
-
 
 
 function local_search!(db, lines, start_ind, nb=nb_local_searches)
@@ -247,8 +220,6 @@ function local_search!(db, lines, start_ind, nb=nb_local_searches)
     count = 0
     pool = OBJ_TYPE[]
     append!(pool, lines[start_ind:min(start_ind + nb - 1,length(lines))])
-            
-
     # we perform the local searches
     @threads for obj in pool
         list_obj, list_rew = local_search_on_object(db, obj)
@@ -276,8 +247,7 @@ function add_db!(db, list_obj, list_rew = nothing)
     # add all objects in list_obj to the database (if not already there)
     # computes the rewards if not provided
     # returns the number of new objects added to the database    
-    rewards_new_objects = []
-    
+    rewards_new_objects = [] 
     if list_rew != nothing
         for i in 1:length(list_obj)
             obj = list_obj[i]
@@ -338,8 +308,7 @@ function shrink!(db)
             count += lg 
             if count > target_db_size
                 k = count - target_db_size
-                for obj in db.rewards[rew][lg-k+1:end]
-                    
+                for obj in db.rewards[rew][lg-k+1:end]                  
                     try
                         delete!(db.objects, obj)
                     catch e 
@@ -361,8 +330,7 @@ function shrink!(db)
 end
 
 function main()
-    db = new_db()
-    
+    db = new_db() 
     lines = initial_lines()
     println(length(lines))
     println(length(Set(lines)))
@@ -370,9 +338,7 @@ function main()
     print(nthreads())
     println(" threads")
     #add_db!(db, lines)
-
     start_idx = 1
-
     steps::Int = 0
     time_since_previous_output = 0
     while start_idx < length(lines)
@@ -381,10 +347,7 @@ function main()
         start_idx += nb_local_searches
         steps += 1
         time_local_search = round(time_local_search, digits=2)
-        print_db(db)
-        
-        #println("\nTime elapsed: local search = $time_local_search s. \n")
-        
+        print_db(db)        
     end
     print_db(db)
     write_output_to_file(db)
