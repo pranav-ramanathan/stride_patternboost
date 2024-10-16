@@ -23,8 +23,8 @@ git clone https://github.com/zawagner22/transformers_math_experiments.git
 2. Navigate to the directory and install the necessary libraries for python and julia
 
 ## Usage
-1. Pick a problem from 'search_fc.jl'. You can create new problems based on the examples provided.
-2. Configure your parameters in 'fc_loop.py'.
+1. Pick a problem from `search_fc.jl`. You can create new problems based on the examples provided.
+2. Configure your parameters in `fc_loop.py`.
 3. Run PatternBoost:
 ```
 python fc_loop.py
