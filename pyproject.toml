@@ -1,0 +1,15 @@
+[project]
+name = "stride-patternboost"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.3",
+    "numpy>=2.3.0",
+    "sympy>=1.14.0",
+    "tensorboard>=2.19.0",
+    "tokenizers>=0.21.1",
+    "torch>=2.7.1",
+    "tqdm>=4.67.1",
+]

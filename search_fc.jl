@@ -11,8 +11,8 @@ using Dates
 
 # Choose the problem to work on here!
 
-#include("problem_triangle_free.jl")  
-include("problem_4_cycle_free.jl")
+include("problem_triangle_free.jl")  
+# include("problem_4_cycle_free.jl")
 #include("problem_permanent_avoid_123.jl")
 
 
@@ -182,13 +182,11 @@ end
 function local_search_on_object(db, obj)
     objects = Vector{OBJ_TYPE}(undef, 0)
     rewards = Vector{REWARD_TYPE}(undef, 0) 
-    greedily_expanded_objs = greedy_search_from_startpoint(db, obj)
-    for greedily_expanded_obj in greedily_expanded_objs      
-        rew, new = reward(db, greedily_expanded_obj)
-        if new
-            push!(objects, greedily_expanded_obj)
-            push!(rewards, rew)
-        end
+    greedily_expanded_obj::OBJ_TYPE = greedy_search_from_startpoint(db, obj) 
+    rew, new = reward(db, greedily_expanded_obj)
+    if new
+        push!(objects, greedily_expanded_obj)
+        push!(rewards, rew)
     end
     return objects, rewards
 end
