@@ -246,8 +246,8 @@ function add_db!(db, list_obj, list_rew = nothing)
     # computes the rewards if not provided
     # returns the number of new objects added to the database    
     rewards_new_objects = [] 
-    if list_rew != nothing
-        for i in 1:length(list_obj)
+    if !isnothing(list_rew)
+        for i in eachindex(list_obj)
             obj = list_obj[i]
             if !haskey(db.objects, obj)       
                 rew = list_rew[i]         
@@ -266,7 +266,7 @@ function add_db!(db, list_obj, list_rew = nothing)
         # compute rewards using multithreading if rewards are not provided
         # first we identify the new objects
         list_indices = Int[]
-        for i in 1:length(list_obj)
+        for i in eachindex(list_obj)
             obj = list_obj[i]
             if !haskey(db.objects, obj)
                 push!(list_indices, i)
