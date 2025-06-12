@@ -119,9 +119,9 @@ const POINT_SET::Vector{Tuple{Int64, Int64}} = [(i, j) for i in 1:N for j in 1:N
 function find_all_312s(points)
     forb_patterns = Vector{Tuple{Tuple{Int, Int}, Tuple{Int, Int}, Tuple{Int, Int}}}()
 
-    for i in 1:length(points)
-        for j in i+1:length(points)
-            for k in j+1:length(points)
+    for i in eachindex(points)
+        for j in i+eachindex(points)
+            for k in j+eachindex(points)
                 if is_312(points[i],points[j],points[k])                    
                     push!(forb_patterns, (points[i], points[j], points[k]))
                 end
@@ -191,8 +191,8 @@ function greedy_search_from_startpoint(db, obj::OBJ_TYPE)::Vector{OBJ_TYPE}
     for (i,j) in random_point_set
         if obj[counter] == '0'
             good = true
-            for a in 1:length(points)
-                for b in a+1:length(points)
+            for a in eachindex(points)
+                for b in a+eachindex(points)
                     if is_312(points[a],points[b],(i,j))
                         good = false
                         break
