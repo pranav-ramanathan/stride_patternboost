@@ -152,7 +152,13 @@ def init_distributed_mode(params):
 
     # set GPU device
     if not params.cpu:
-        torch.cuda.set_device(params.local_rank)
+        if torch.cuda.is_available():
+            torch.cuda.set_device(params.local_rank)
+        elif torch.backends.mps.is_available():
+            # MPS doesn't require explicit device setting like CUDA
+            pass
+        else:
+            logger.warning("No GPU available, continuing with CPU")
 
     # initialize multi-GPU
     if params.multi_gpu:
@@ -165,7 +171,17 @@ def init_distributed_mode(params):
         # RANK - required; can be set either here, or in a call to init function
 
         print("Initializing PyTorch distributed ...")
+        
+        # Choose appropriate backend based on available hardware
+        if torch.cuda.is_available():
+            backend = 'nccl'
+        elif torch.backends.mps.is_available():
+            backend = 'gloo'  # MPS doesn't support nccl, use gloo instead
+            logger.warning("Using 'gloo' backend for MPS distributed training")
+        else:
+            backend = 'gloo'  # CPU fallback
+            
         torch.distributed.init_process_group(
             init_method='env://',
-            backend='nccl',
+            backend=backend,
         )
