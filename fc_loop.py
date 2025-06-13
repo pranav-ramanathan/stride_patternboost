@@ -71,6 +71,8 @@ def get_parser():
                         help="Master port (for multi-node SLURM jobs)")
     parser.add_argument("--cpu", type=bool_flag, default="false",
                         help="run on cpu only")
+    parser.add_argument("--mps", type=bool_flag, default="false",
+                        help="force use of Apple Silicon MPS backend")
 # debug
     parser.add_argument("--debug_slurm", type=bool_flag, default=False,
                         help="Debug multi-GPU / multi-node within a SLURM job")
@@ -259,7 +261,23 @@ if __name__ == '__main__':
     if args.is_slurm_job:
         init_signal_handler()
     
-    args.device = "cpu" if args.cpu else "cuda"
+    # Device selection with Apple Silicon support
+    if args.cpu:
+        args.device = "cpu"
+    elif args.mps and torch.backends.mps.is_available():
+        args.device = "mps"
+        logger.info("Using Apple Silicon MPS backend (forced)")
+    elif torch.cuda.is_available():
+        args.device = "cuda"
+    elif torch.backends.mps.is_available():
+        args.device = "mps"
+        logger.info("Using Apple Silicon MPS backend (auto-detected)")
+    else:
+        args.device = "cpu"
+        logger.info("No GPU available, falling back to CPU")
+    
+    logger.info(f"Using device: {args.device}")
+    
     if args.seed < 0:
         args.seed = np.random.randint(1_000_000_000)
     logger.info(f"seed: {args.seed}")
@@ -357,9 +375,11 @@ if __name__ == '__main__':
 
             
 
-            # wait for all CUDA work on the GPU to finish then calculate iteration time taken
-            if args.device =="cuda":
+            # wait for all GPU work to finish then calculate iteration time taken
+            if args.device == "cuda":
                 torch.cuda.synchronize()
+            elif args.device == "mps":
+                torch.mps.synchronize()
             t1 = time.time()
 
             # logging
