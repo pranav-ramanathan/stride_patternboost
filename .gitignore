@@ -98,3 +98,7 @@ checkpoint/*
 # Tensorboard
 runs/
 logs/
+
+checkpoint/*
+
+TODO

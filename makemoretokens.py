@@ -711,7 +711,8 @@ if __name__ == '__main__':
 
     # system inits
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     os.makedirs(args.work_dir, exist_ok=True)
     if not args.sample_only:
         writer = SummaryWriter('logs/'+datetime.datetime.now().strftime("%Y%m%d-%H%M"))
@@ -786,9 +787,11 @@ if __name__ == '__main__':
         loss.backward()
         optimizer.step()
 
-        # wait for all CUDA work on the GPU to finish then calculate iteration time taken
+        # wait for all GPU work to finish then calculate iteration time taken
         if args.device.startswith('cuda'):
             torch.cuda.synchronize()
+        elif args.device == 'mps':
+            torch.mps.synchronize()
         t1 = time.time()
 
         # logging

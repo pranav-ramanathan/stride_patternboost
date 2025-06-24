@@ -1,5 +1,3 @@
-
-
 import os
 import sys
 import time
@@ -33,7 +31,12 @@ from no_sphere_simple2 import NoSphereSimple
 logger=getLogger()
 
 def get_parser():
-    parser = argparse.ArgumentParser('PatternBoost for no_spheres')
+    parser = argparse.ArgumentParser('PatternBoost for no_spheres - with resume capability')
+
+    # Resume training parameters
+    parser.add_argument('--resume_model_path', type=str, default=None, help='Path to the model checkpoint to resume from')
+    parser.add_argument('--resume_generation', type=int, default=None, help='Generation number to resume from (if not specified, will auto-detect)')
+    parser.add_argument('--resume_training_data_path', type=str, default=None, help='Path to the training data directory to resume from (if different from dump_path)')
 
     # local search parameters
     parser.add_argument('--grid_size',type=int,default=6,help='Grid size for no_spheres')
@@ -316,18 +319,28 @@ def decode_and_fix(args,token_decoding,generation):
     # it is good to have a record of the samples processed in each round
     shutil.os.remove(args.dump_path + '/out.txt')
 
+
+def detect_resume_generation(training_data_path, grid_size):
+    """Auto-detect the latest generation available for resuming"""
+    max_gen = -1
+    # Look for any generation files, not necessarily continuous from 0
+    for i in range(100):  # reasonable upper bound
+        if os.path.isfile(os.path.join(training_data_path, f"training_sets/N{grid_size}_gen{i}.txt")):
+            max_gen = i
+    return max_gen
+
+
 if __name__ == '__main__':
     parser = get_parser()
     args = parser.parse_args()
-#    init_distributed_mode(args)
-#    logger = initialize_exp(args)
-#    if args.is_slurm_job:
-#        init_signal_handler()
+
+    # Validate resume arguments
+    if args.resume_model_path is not None:
+        if not os.path.isfile(args.resume_model_path):
+            raise ValueError(f"Resume model path does not exist: {args.resume_model_path}")
+        logger.info(f"Resuming from model: {args.resume_model_path}")
     
     log_prefix = args.dump_path + "/"
-    #log_base + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    #log_prefix += f"_n={args.n},r={args.r},bucket_size={args.bucket_size},seed={args.seed}"
-    #log_prefix += args.notes + "/"
 
     if not os.path.exists(log_prefix):
         os.makedirs(log_prefix)
@@ -384,7 +397,6 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-    # os.makedirs(args.work_dir, exist_ok=True)
 
     N = args.grid_size
 
@@ -393,82 +405,104 @@ if __name__ == '__main__':
     a_indices, b_indices, c_indices = torch.meshgrid(torch.arange(N), torch.arange(N), torch.arange(N), indexing='ij')
     token_decoding = torch.stack([a_indices, b_indices, c_indices], dim=-1).view(-1, 3)
 
-    # init datasets
-
-    for i in range(args.max_epochs):
-        if not os.path.isfile(log_prefix+f"training_sets/N{N}_gen{i}.txt"):
-            break
-    initial_gen = i
-    
-    if initial_gen > 0:
-        initial_gen = initial_gen - 1 # first index for which we have training data
-    else:
-        # we should generate some training data!
-
-        logger.info("Generating 0th generation of training data...")
-
-        training_path_root = args.dump_path + f'/training_sets/N{N}_gen{initial_gen}'
-        training_path = training_path_root + '.txt'
-
-        constructions_log = []
-        best_constructions_per_batch = int(args.batch_size * args.keep_best_fraction)
+    # Determine the generation to start from
+    if args.resume_model_path is not None:
+        # Resume mode
+        training_data_path = args.resume_training_data_path if args.resume_training_data_path else args.dump_path
         
-        t0 = time.time()
+        if args.resume_generation is not None:
+            initial_gen = args.resume_generation
+            logger.info(f"Resuming from explicitly specified generation: {initial_gen}")
+        else:
+            # Auto-detect the latest generation
+            initial_gen = detect_resume_generation(training_data_path, N)
+            if initial_gen == -1:
+                raise ValueError(f"No training data found in {training_data_path}/training_sets/ for grid size {N}")
+            logger.info(f"Auto-detected resuming from generation: {initial_gen}")
+        
+        # Check if training data exists
+        resume_training_file = os.path.join(training_data_path, f"training_sets/N{N}_gen{initial_gen}.txt")
+        if not os.path.isfile(resume_training_file):
+            raise ValueError(f"Training data not found: {resume_training_file}")
+        
+        logger.info(f"Using training data from: {resume_training_file}")
+        
+    else:
+        # Standard mode - find existing generation or start from 0
+        for i in range(args.max_epochs):
+            if not os.path.isfile(log_prefix+f"training_sets/N{N}_gen{i}.txt"):
+                break
+        initial_gen = i
+        
+        if initial_gen > 0:
+            initial_gen = initial_gen - 1 # first index for which we have training data
+        else:
+            # Generate 0th generation training data
+            logger.info("Generating 0th generation of training data...")
 
-        for _ in range(int(args.target_training_size/best_constructions_per_batch)):
-            # generate some constructions
-            no_sphere = NoSphereSimple(batch_size=args.batch_size,grid_size=args.grid_size,max_points=args.max_points,device=args.device)
-            no_sphere.saturate()
+            training_path_root = args.dump_path + f'/training_sets/N{N}_gen{initial_gen}'
+            training_path = training_path_root + '.txt'
 
-            # sort according to number of points
-            x = torch.argsort(no_sphere.current_counts,descending=True)
-            top_constructions = ((no_sphere.current_constructions[x[0:best_constructions_per_batch]]==1)*1).cpu()
+            constructions_log = []
+            best_constructions_per_batch = int(args.batch_size * args.keep_best_fraction)
+            
+            t0 = time.time()
 
-            constructions_log += no_sphere.current_counts.int().tolist()
+            for _ in range(int(args.target_training_size/best_constructions_per_batch)):
+                # generate some constructions
+                no_sphere = NoSphereSimple(batch_size=args.batch_size,grid_size=args.grid_size,max_points=args.max_points,device=args.device)
+                no_sphere.saturate()
 
-            out_string = ''
-            if args.symmetrize:
-                for permuted_constructions in permute_and_flip_generator(top_constructions):
-                    for construction in permuted_constructions:
+                # sort according to number of points
+                x = torch.argsort(no_sphere.current_counts,descending=True)
+                top_constructions = ((no_sphere.current_constructions[x[0:best_constructions_per_batch]]==1)*1).cpu()
+
+                constructions_log += no_sphere.current_counts.int().tolist()
+
+                out_string = ''
+                if args.symmetrize:
+                    for permuted_constructions in permute_and_flip_generator(top_constructions):
+                        for construction in permuted_constructions:
+                            indices = torch.nonzero(construction)
+                            encoding = token_encoding[indices[:,0],indices[:,1],indices[:,2]]
+                            encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
+                            out_string += encoding_string
+                    out_string_unpermuted = ''
+                    for construction in top_constructions:
+                        indices = torch.nonzero(construction)
+                        encoding = token_encoding[indices[:,0],indices[:,1],indices[:,2]]
+                        encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
+                        out_string_unpermuted += encoding_string
+                    
+                else:
+                    for construction in top_constructions:
                         indices = torch.nonzero(construction)
                         encoding = token_encoding[indices[:,0],indices[:,1],indices[:,2]]
                         encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
                         out_string += encoding_string
-                out_string_unpermuted = ''
-                for construction in top_constructions:
-                    indices = torch.nonzero(construction)
-                    encoding = token_encoding[indices[:,0],indices[:,1],indices[:,2]]
-                    encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
-                    out_string_unpermuted += encoding_string
-                
-            else:
-                for construction in top_constructions:
-                    indices = torch.nonzero(construction)
-                    encoding = token_encoding[indices[:,0],indices[:,1],indices[:,2]]
-                    encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
-                    out_string += encoding_string
 
-            with open(training_path,'a') as f:
-            #    print(f"Writing {top_constructions.shape[0]} constructions to {training_path}.")
-                f.write(out_string)
+                with open(training_path,'a') as f:
+                #    print(f"Writing {top_constructions.shape[0]} constructions to {training_path}.")
+                    f.write(out_string)
 
-            if args.symmetrize:
-                with open(training_path_root + '_unpermuted.txt','a') as f:
-                    f.write(out_string_unpermuted)
+                if args.symmetrize:
+                    with open(training_path_root + '_unpermuted.txt','a') as f:
+                        f.write(out_string_unpermuted)
 
-    #        torch.cuda.empty_cache()
-        if args.device == "cuda":
-            logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
-        elif args.device == "mps":
-            logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
-        logger.info(f"Generated {len(constructions_log)} constructions.")
-        logger.info(f"Generation took {time.time()-t0:.2f} seconds.")
-        logger.info(f"Distribution of counts = {Counter(constructions_log)}")
-    
-    assert os.path.isfile(log_prefix+f"training_sets/N{N}_gen{initial_gen}.txt")
+        #        torch.cuda.empty_cache()
+            if args.device == "cuda":
+                logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
+            elif args.device == "mps":
+                logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
+            logger.info(f"Generated {len(constructions_log)} constructions.")
+            logger.info(f"Generation took {time.time()-t0:.2f} seconds.")
+            logger.info(f"Distribution of counts = {Counter(constructions_log)}")
+
+    # Now we should have training data available
+    input_file = (args.resume_training_data_path if args.resume_training_data_path else args.dump_path) + f"/training_sets/N{N}_gen{initial_gen}.txt"
+    assert os.path.isfile(input_file), f"Training file not found: {input_file}"
 
     logger.info(f"initializing at generation: {initial_gen}")
-    input_file = args.dump_path + f"/training_sets/N{N}_gen{initial_gen}.txt"
     train_dataset, test_dataset = create_datasets(input_file,force_tokens=N**3)
     vocab_size = train_dataset.get_vocab_size()
     block_size = args.max_points + 1
@@ -494,19 +528,39 @@ if __name__ == '__main__':
         logger.error(f'model type {args.type} is not recognized')
     model.to(args.device)
     logger.info(f"model #params: {sum(p.numel() for p in model.parameters())}")
-    model_path = os.path.join(args.dump_path, "model.pt")
-    if os.path.isfile(model_path): # Note: if we sample-only then we also assume we are resuming
-        logger.info("resuming from existing model")
-        model.load_state_dict(torch.load(model_path))
+    
+    # Load the model
+    if args.resume_model_path is not None:
+        logger.info(f"Loading model from: {args.resume_model_path}")
+        model.load_state_dict(torch.load(args.resume_model_path, map_location=args.device))
+    else:
+        # Check for model in current dump_path
+        model_path = os.path.join(args.dump_path, "model.pt")
+        if os.path.isfile(model_path):
+            logger.info(f"Loading existing model from: {model_path}")
+            model.load_state_dict(torch.load(model_path, map_location=args.device))
 
-    for generation in range(initial_gen,args.max_epochs + 1):
-        logger.info(f"============ Start of generation {generation} ============")
+    # When resuming, we want the output to start from generation 0, regardless of the resume generation
+    resume_offset = initial_gen if args.resume_model_path is not None else 0
+    
+    for generation_idx in range(args.max_epochs + 1):
+        actual_generation = initial_gen + generation_idx if args.resume_model_path is not None else generation_idx
+        output_generation = generation_idx  # Always start output numbering from 0
+        
+        logger.info(f"============ Start of generation {output_generation} ============")
+        if args.resume_model_path is not None and generation_idx == 0:
+            logger.info(f"Resuming from original generation {actual_generation}")
+        
         if args.device == "cuda":
             logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
         elif args.device == "mps":
             logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
 
-        input_file = args.dump_path + f"/training_sets/N{N}_gen{generation}.txt"
+        # For the initial generation when resuming, use the resume training data path
+        if generation_idx == 0 and args.resume_training_data_path is not None:
+            input_file = args.resume_training_data_path + f"/training_sets/N{N}_gen{actual_generation}.txt"
+        else:
+            input_file = args.dump_path + f"/training_sets/N{N}_gen{output_generation}.txt"
         train_dataset, test_dataset = create_datasets(input_file,force_tokens=N**3)
 
         logger.info(f"training on {input_file}")
@@ -579,22 +633,7 @@ if __name__ == '__main__':
         tot_sum = 0
         tot_max = 0
 
-        ## I think the following was to make sure we always carry old constructions across. I'm ignoring this for the moment.
-
-        #out_file = args.dump_path + "/out.txt"
-        #in_file = args.dump_path + f"/N{N}_gen{generation}.txt"
-#        with open(in_file, 'r') as f:
-#            data = f.read()
-#        words = data.splitlines()
-#        with open(out_file, "w") as file:
-#            for word in words:
-#                file.write(word)
-#                file.write("\n")
-
         while sample_batch_size < todo:
-#            logger.info(f'{tot_n=},{tot_sum=},{tot_max=}')
-#            if todo % 50 ==0 : 
-#                logger.info(f'{todo} samples remaining')
             n, sm, mx = write_samples(num=sample_batch_size)
             tot_n+=n
             tot_sum+=sm
@@ -619,16 +658,9 @@ if __name__ == '__main__':
         elif args.device == "cuda":
             torch.cuda.empty_cache()
             
-        decode_and_fix(args,token_decoding=token_decoding,generation=generation+1)
+        decode_and_fix(args,token_decoding=token_decoding,generation=output_generation+1)
         if args.device == "cuda":
             logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
         elif args.device == "mps":
             logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
-        logger.info(f"============ End of generation {generation} ============")
-        # if os.path.exists(args.dump_path+"/distribution.txt"):
-        #     with open(args.dump_path+"/distribution.txt", 'r') as file:
-        #         d_lines = file.readlines()
-        # logger.info("distribution of scores")
-        # for l in d_lines:
-        #     logger.info(l[:-1])
-
+        logger.info(f"============ End of generation {output_generation} ============") 

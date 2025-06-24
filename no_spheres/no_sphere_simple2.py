@@ -1,4 +1,3 @@
-
 import torch
 from math import comb
 import dataclasses
@@ -379,3 +378,43 @@ class NoSphereSimple:
         can_add = self.check_new_points(points.unsqueeze(1)).squeeze(1)   # points.unsqueeze(1).shape = (B,1,3)
         points[~can_add] = self.null_tensor
         self.add_points(points)
+
+
+if __name__ == "__main__":
+    from collections import Counter
+    import time
+
+    N = 6
+    # Based on gw_loop.py defaults
+    MAX_POINTS = 18 
+    BATCH_SIZE = 100
+
+    print(f"Running NoSphereSimple test with grid_size={N}, batch_size={BATCH_SIZE}, max_points={MAX_POINTS}")
+
+    solver = NoSphereSimple(batch_size=BATCH_SIZE, grid_size=N, max_points=MAX_POINTS)
+    
+    t0 = time.time()
+    solver.saturate()
+    t1 = time.time()
+    print(f"Saturation took {t1 - t0:.2f} seconds.")
+    
+    print("\n--- Test Results ---")
+    max_pts = torch.max(solver.current_counts).item()
+    print(f"Max points found in a construction: {max_pts}")
+    print(f"Total constructions: {solver.batch_size}")
+
+    points_counter = Counter(solver.current_counts.tolist())
+    print("Distribution of point counts:")
+    print(points_counter)
+
+    # Print the best construction
+    if solver.batch_size > 0:
+        best_idx = torch.argmax(solver.current_counts).item()
+        num_points = solver.current_counts[best_idx].item()
+        
+        # Get points from the tuple list
+        points_list = solver.tuples[1][best_idx, :num_points, 0, :].cpu().tolist()
+        
+        print(f"\n--- Best Construction ---")
+        print(f"Found {num_points} points on a {solver.N}x{solver.N}x{solver.N} grid")
+        print("Points:", points_list)
