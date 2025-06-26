@@ -22,48 +22,60 @@ from no_three_in_line import NoThreeInLine
 
 def get_parser():
     parser = argparse.ArgumentParser('PatternBoost for no-three-in-line')
-    
+
     # ========================================================================
     # TODO: Adjust default parameters for no-three-in-line problem
     # ========================================================================
-    parser.add_argument('--grid_size', type=int, default=6, help='Grid size (creates NxN 2D grid)')  
-    # TODO: Consider smaller grid_size for 2D (e.g., 8-12) since we have fewer positions
-    
-    parser.add_argument('--batch_size', type=int, default=500, help='Generate and process samples in batches')
-    
-    parser.add_argument('--max_points', type=int, default=18, help='max points which can be added')  
-    # TODO: Consider larger max_points for 2D - might be able to place more before hitting constraint
-    
-    parser.add_argument('--target_training_size', type=int, default=20000, help='number of examples to aim for')
+    parser.add_argument('--grid_size', type=int, default=6, help='Grid size for 2D no-three-in-line (creates NxN grid)')
+    parser.add_argument('--batch_size', type=int, default=500, help='Generate and process samples in batches of this size')
+    parser.add_argument('--max_points', type=int, default=18, help='max points which can be added to construction')
+    parser.add_argument('--target_training_size', type=int, default=20000, help='number of examples to aim for (before symmetrization)')
     parser.add_argument('--keep_best_fraction', type=float, default=0.1, help='Percentage of good constructions to keep')
-    parser.add_argument('--symmetrize', default=True, action=argparse.BooleanOptionalAction, help='symmetrize constructions')
+    parser.add_argument('--symmetrize', default=True, action=argparse.BooleanOptionalAction, help='symmetrize constructions, set to --no-symmetrize to disable')
+
+    # Makemore / Neural network params (matching your working version)
+    parser.add_argument('--num-workers', '-n', type=int, default=8, help="number of data workers for both train/test")
+    parser.add_argument('--max-steps', type=int, default=5000, help="max number of optimization steps to run for, or -1 for infinite.")
+    parser.add_argument('--max_epochs', type=int, default=20, help='number of epochs')
+    parser.add_argument('--seed', type=int, default=-1, help="seed")
     
-    # Neural network parameters (unchanged)
-    parser.add_argument('--max-steps', type=int, default=5000, help="max optimization steps")
-    parser.add_argument('--type', type=str, default='transformer', choices=['transformer', 'bigram', 'mlp', 'rnn', 'bow'], help="model type")
+    # sampling
+    parser.add_argument('--top-k', type=int, default=-1, help="top-k for sampling, -1 means no top-k")
+    
+    # model
+    parser.add_argument('--type', type=str, default='transformer', help="model class type to use, bigram|mlp|rnn|gru|bow|transformer")
+    parser.add_argument('--n-layer', type=int, default=4, help="number of layers")
+    parser.add_argument('--n-head', type=int, default=4, help="number of heads (in a transformer)")
+    parser.add_argument('--n-embd', type=int, default=64, help="number of feature channels in the model")
+    parser.add_argument('--n-embd2', type=int, default=16, help="number of feature channels elsewhere in the model")
+    
+    # optimization
+    parser.add_argument('--nn-batch-size', '-b', type=int, default=64, help="batch size during neural network optimization")
     parser.add_argument('--learning-rate', '-l', type=float, default=1e-4, help="learning rate")
-    parser.add_argument('--weight-decay', type=float, default=0.01, help="weight decay")
-    parser.add_argument('--batch-size', '-b', type=int, default=64, help="batch size for training neural network")
-    parser.add_argument('--sequence-length', '-s', type=int, default=128, help="sequence length")
-    parser.add_argument('--device', type=str, default='cpu', help="device")
-    parser.add_argument('--warmup-iters', type=int, default=100, help="linear learning rate warmup")
-    parser.add_argument('--sample-every', type=int, default=100, help="how often to sample")
-    parser.add_argument('--dump_path', type=str, default='./logs', help="model path")
+    parser.add_argument('--weight-decay', '-w', type=float, default=0.1, help="weight decay")
+
+    parser.add_argument('--gen_batch_size', type=int, default=10, help="batch size for generation from transformer")
+    parser.add_argument('--temperature', type=float, default=1.0, help="temperature")
     
-    # Generation parameters (unchanged)
-    parser.add_argument('--temperature', type=float, default=1.0, help="temperature for sampling")
-    parser.add_argument('--top_k', type=int, default=-1, help="top-k sampling")
+    # path and system
+    parser.add_argument("--dump_path", type=str, default="dump_path", help="Experiment dump path")
+    parser.add_argument("--exp_name", type=str, default="debug", help="Experiment name")
+    parser.add_argument("--exp_id", type=str, default="", help="Experiment ID")
+    parser.add_argument("--local_rank", type=int, default=-1, help="Multi-GPU - Local rank")
+    parser.add_argument("--master_port", type=int, default=-1, help="Master port (for multi-node SLURM jobs)")
+
+    parser.add_argument("--cpu", default=False, action=argparse.BooleanOptionalAction, help="run on cpu only")
+    parser.add_argument("--device", type=str, default="auto", help="device to use for compute: auto|cpu|cuda|mps")
     
-    # Evolution parameters (unchanged)
-    parser.add_argument('--max_epochs', type=int, default=10, help="number of generations to run")
-    parser.add_argument('--initial_gen', type=int, default=0, help="generation to start from")
-    
+    # debug
+    parser.add_argument("--debug_slurm", default=True, action=argparse.BooleanOptionalAction, help="Debug multi-GPU / multi-node within a SLURM job")
+    parser.add_argument("--debug", default=True, action=argparse.BooleanOptionalAction, help="Enable all debug flags")
+
     return parser
 
 def create_datasets(input_file, force_tokens=-1):
     """Set up datasets from a .txt file consisting of tokens like V0,V1,...
     
-    TODO: No changes needed - this handles token sequences generically
     Flow: 
     1. Read lines of comma-separated tokens: "V1,V5,V12"
     2. Split into individual tokens: ["V1", "V5", "V12"] 
@@ -91,18 +103,12 @@ def create_datasets(input_file, force_tokens=-1):
     train_words = words[:int(0.9*len(words))]
     test_words = words[int(0.9*len(words)):]
     
-    train_dataset = CharDataset(train_words, chars, args.sequence_length)
-    test_dataset = CharDataset(test_words, chars, args.sequence_length)
+    train_dataset = CharDataset(train_words, chars, args.max_points)
+    test_dataset = CharDataset(test_words, chars, args.max_points)
     
     return train_dataset, test_dataset
 
-def write_samples(
-    model,
-    train_dataset,
-    num=10,
-    new_file=False,
-    use_logger=False,
-):
+def write_samples(model, train_dataset, num=10, new_file=False, use_logger=False):
     """ samples from the model and writes them to file 
     
     TODO: This function uses undefined variables (model, train_dataset, args)
@@ -149,33 +155,48 @@ def write_samples(
             samples.append(word_samp)
     
     out_file = args.dump_path + '/out.txt'
-    logger.info(f"Writing {len(samples)} samples to {out_file}")
+    # logger.info(f"Writing {len(samples)} samples to {out_file}")
     with open(out_file, "a" if not new_file else "w") as file:
         for word in samples:
             file.write(word + "\n")
 
 def generate_2d_symmetries(construction):
-    """Generate symmetries of 2D constructions
+    """Generate unique symmetries of 2D constructions
     
-    TODO: Implement 2D symmetry generation
-    Flow:
-    1. For 2D NxN grid, we have 8 total symmetries:
-       - 4 rotations: 0°, 90°, 180°, 270°
-       - 4 reflections: horizontal flip, vertical flip, diagonal flips
-    2. Apply each transformation to input construction
-    3. Yield each transformed version
-    4. This increases training data diversity (1 good construction → 8 training examples)
+    Generates up to 8 symmetries of a 2D construction, but only yields unique ones.
+    For highly symmetric constructions, this may yield fewer than 8 results.
     
     Args:
         construction: tensor representing 2D point placement
     Yields:
-        transformed versions of the construction
+        unique transformed versions of the construction
     """
-    # TODO: Implement 2D transformations
-    # For now, just yield original (no symmetries)
-    yield construction
+    seen_constructions = set()
+    
+    # Convert to tuple for hashing (tensors aren't hashable)
+    def tensor_to_tuple(tensor):
+        return tuple(tensor.flatten().tolist())
+    
+    # Generate all 8 possible symmetries
+    transformations = []
+    
+    # 4 rotations of the original
+    for k in range(4):
+        transformations.append(torch.rot90(construction, k, [0, 1]))
+    
+    # 4 rotations of a single flip
+    flipped = torch.flip(construction, [0])
+    for k in range(4):
+        transformations.append(torch.rot90(flipped, k, [0, 1]))
+    
+    # Only yield unique transformations
+    for transformed in transformations:
+        key = tensor_to_tuple(transformed)
+        if key not in seen_constructions:
+            seen_constructions.add(key)
+            yield transformed
 
-def decode_and_fix(args, token_decoding, generation):
+def decode_and_fix(args, token_decoding, token_encoding, generation):
     """
     Core algorithm: Read neural network samples, convert to geometric constructions,
     test them with no-three-in-line constraint, and save the best ones.
@@ -208,6 +229,15 @@ def decode_and_fix(args, token_decoding, generation):
     batch_idx = 0
     total_pre_sat = 0
     total_post_sat = 0
+    # Efficient histogram accumulators (CPU tensors)
+    hist_pre = torch.zeros(args.max_points + 1, dtype=torch.int64)
+    hist_post = torch.zeros(args.max_points + 1, dtype=torch.int64)
+    # timing accumulators
+    times_adding_points = []  # seconds per batch for adding points
+    times_saturating = []     # seconds per batch for saturate
+    
+    # Global deduplication across all batches
+    unique_encodings = set()
     
     # Process in batches
     for b in range(0, len(sampled_tokens), args.batch_size):
@@ -229,6 +259,7 @@ def decode_and_fix(args, token_decoding, generation):
         # Try adding points suggested by neural network
         # TODO: Handle coordinate conversion from tokens to 2D positions
         max_length = max(len(seq) for seq in current_batch)
+        t_add0 = time.time()
         for i in range(max_length):
             # TODO: Create coordinate tensor appropriate for 2D problem
             # Flow: 
@@ -236,43 +267,86 @@ def decode_and_fix(args, token_decoding, generation):
             # 2. Convert token number to (x,y) coordinate using token_decoding
             # 3. Handle missing tokens (sequences of different lengths)
             # 4. Pass coordinates to no_three.try_to_add_points()
-            raise NotImplementedError("TODO: Implement token-to-coordinate conversion for 2D")
+            
+            # HINT: Use something like:
+            # points = -1 * torch.ones((cur_batch_size, 2), dtype=torch.int8, device=args.device)
+            # for j in range(cur_batch_size):
+            #     if i < len(current_batch[j]):
+            #         token_num = current_batch[j][i]
+            #         if token_num < len(token_decoding):
+            #             points[j] = token_decoding[token_num]
+            # no_three.try_to_add_points(points)
+
+            points = -1 * torch.ones((cur_batch_size, 2), dtype=torch.int8, device=args.device)
+            for j in range(cur_batch_size):
+                if i < len(current_batch[j]):
+                    token_num = current_batch[j][i]
+                    if token_num < len(token_decoding):
+                        points[j] = token_decoding[token_num]
+            no_three.try_to_add_points(points)
+            
+        t_add1 = time.time()
+        times_adding_points.append(t_add1 - t_add0)
         
         # Record points added from neural network suggestions
         total_pre_sat += torch.sum(no_three.current_counts.float()).item()
+        # Update histogram efficiently
+        counts_cpu = no_three.current_counts.cpu().int()
+        hist_pre += torch.bincount(counts_cpu, minlength=args.max_points + 1)
         
-        # TODO: Make sure your constraint class implements saturate()
+        t_sat0 = time.time()
         no_three.saturate()  # Complete constructions greedily
+        t_sat1 = time.time()
+        times_saturating.append(t_sat1 - t_sat0)
         
         # Record final point counts
         total_post_sat += torch.sum(no_three.current_counts.float()).item()
+        counts_cpu_post = no_three.current_counts.cpu().int()
+        hist_post += torch.bincount(counts_cpu_post, minlength=args.max_points + 1)
         
         # Keep only the best constructions (unchanged logic)
         x = torch.argsort(no_three.current_counts, descending=True)
         best_constructions_per_batch = int(args.batch_size * args.keep_best_fraction)
         
-        # TODO: Handle extraction of best constructions for 2D case
-        # Flow: Get top constructions based on point count ranking
-        raise NotImplementedError("TODO: Extract best 2D constructions")
-        
-        logger.info(f"Batch {batch_idx}: keeping {len(top_constructions)} best constructions")
+        # TODO: Extract the best constructions after saturation.
+        #  1. Use `torch.argsort` on `no_three.current_counts` to get the indices of the best constructions.
+        #  2. Select the top `best_constructions_per_batch` indices.
+        #  3. Use these indices to get the corresponding construction grids from `no_three.current_constructions`.
+        #  4. Ensure the resulting `top_constructions` tensor is on the CPU for further processing.
+        top_constructions = ((no_three.current_constructions[x[0:best_constructions_per_batch]] == 1) * 1).cpu()
         
         # Apply symmetries to increase training data
         if args.symmetrize:
-            # TODO: Use 2D symmetries instead of 3D
             for construction in top_constructions:
                 for symmetric_construction in generate_2d_symmetries(construction):
-                    # TODO: Convert 2D construction back to token sequence
-                    # Flow:
-                    # 1. Find all positions where points are placed
-                    # 2. Convert (x,y) positions back to token numbers
-                    # 3. Create comma-separated string: "V1,V5,V12"
-                    # 4. Add to training data string
-                    raise NotImplementedError("TODO: Convert 2D construction to token sequence")
+                    indices = torch.nonzero(symmetric_construction)
+                    if indices.numel() > 0:
+                        encoding = token_encoding[indices[:, 0], indices[:, 1]]
+                        # Sort encoding to create canonical form (same pattern = same sorted tokens)
+                        sorted_encoding = tuple(sorted(encoding.tolist()))
+                        
+                        # Only add if we haven't seen this pattern before
+                        if sorted_encoding not in unique_encodings:
+                            unique_encodings.add(sorted_encoding)
+                            encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
+                            out_string += encoding_string
+
         else:
             for construction in top_constructions:
-                # TODO: Convert construction to token sequence without symmetries
-                raise NotImplementedError("TODO: Convert construction to tokens")
+                
+                # indices = torch.nonzero(construction)
+                # if indices.numel() > 0:
+                #     encoding = token_encoding[indices[:, 0], indices[:, 1]]
+                #     encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
+                #     out_string += encoding_string
+
+                indices = torch.nonzero(construction)
+                if indices.numel() > 0:
+                    encoding = token_encoding[indices[:, 0], indices[:, 1]]
+                    encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
+                    out_string += encoding_string
+                
+
     
     # Save training data for next generation (unchanged)
     training_path = args.dump_path + f"/training_sets/N{N}_gen{generation}.txt"
@@ -285,139 +359,325 @@ def decode_and_fix(args, token_decoding, generation):
     logger.info(f"Total points in final constructions: {total_post_sat}")
     logger.info(f"Training data saved to {training_path}")
 
+    # Log deduplication statistics
+    if args.symmetrize:
+        logger.info(f"Generated {len(unique_encodings)} unique constructions after symmetry deduplication")
+
+    # Convert histograms to Counter for logging
+    all_counts_pre_ctr = Counter({i:int(v) for i,v in enumerate(hist_pre.tolist()) if v != 0})
+    all_counts_post_ctr = Counter({i:int(v) for i,v in enumerate(hist_post.tolist()) if v != 0})
+    logger.info(f"score distribution before saturation: {all_counts_pre_ctr}")
+    logger.info(f"score distribution after  saturation: {all_counts_post_ctr}")
+    if times_adding_points:
+        logger.info(f"adding_average_time={sum(times_adding_points)/len(times_adding_points):.2f}s, saturating_average_time={sum(times_saturating)/len(times_saturating):.2f}s")
+
+    # Clean up out.txt file (matching no_spheres behavior)
+    shutil.os.remove(args.dump_path + '/out.txt')
+
 if __name__ == '__main__':
     import torch
     import torch.nn.functional as F
+    import numpy as np
     import random
     
     # Parse arguments (unchanged)
     parser = get_parser()
     args = parser.parse_args()
     
-    # Setup logging (unchanged)
-    logging.basicConfig(
-        format='%(asctime)s %(levelname)-8s %(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S')
-    logger = logging.getLogger(__name__)
+    # Setup logging and directories (matching your working version)
+    log_prefix = args.dump_path + "/"
+    if not os.path.exists(log_prefix):
+        os.makedirs(log_prefix)
+    training_dir = log_prefix + 'training_sets'
+    if not os.path.exists(training_dir):
+        os.makedirs(training_dir)
+
+    # Configure logging with both console and file output
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.handlers = []  # Clear any existing handlers
     
-    # Create output directories (unchanged)
-    os.makedirs(args.dump_path, exist_ok=True)
-    os.makedirs(args.dump_path + "/training_sets", exist_ok=True)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    fh = logging.FileHandler(log_prefix + 'program-exp.log')
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    fh.setFormatter(formatter)
+    logger.addHandler(ch)
+    logger.addHandler(fh)
+
+    # Set device with proper MPS support
+    if args.device == "auto":
+        if args.cpu:
+            args.device = "cpu"
+        elif torch.backends.mps.is_available():
+            args.device = "mps"
+        elif torch.cuda.is_available():
+            args.device = "cuda"
+        else:
+            args.device = "cpu"
+    
+    logger.info(f"Using device: {args.device}")
+        
+    if args.seed < 0:
+        args.seed = np.random.randint(1_000_000_000)
+    logger.info(f"seed: {args.seed}")
+
+    # print args to file
+    with open(log_prefix + 'args.txt', 'w') as f:
+        logger.info(pprint.pformat(args.__dict__))
+
+    # system inits
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     
     # ========================================================================
-    # TODO: Create coordinate mapping system for 2D problem
+    # Create coordinate mapping system for 2D problem
     # ======================================================================== 
     N = args.grid_size
+    logger.info(f"Creating token maps for {N}x{N} grid...")
+    # token_encoding: (x, y) -> token_id
+    token_encoding = torch.arange(N*N).view(N, N)
+    # token_decoding: token_id -> (x, y)
+    coords = torch.stack(
+        torch.meshgrid(torch.arange(N), torch.arange(N), indexing='xy'), 
+        -1
+    )
+    token_decoding = coords.view(-1, 2) # Reshape from (N, N, 2) to (N*N, 2)
+    logger.info("Token maps created successfully.")
     
-    # TODO: Design token ↔ coordinate mapping for 2D grid
-    # Flow:
-    # 1. We have NxN positions in 2D grid: (0,0), (0,1), ..., (N-1,N-1)
-    # 2. Need bijection between positions and token numbers 0, 1, 2, ..., N²-1
-    # 3. Example mapping: token_number = x * N + y
-    # 4. Reverse mapping: x = token_number // N, y = token_number % N
-    # 5. Create token_encoding: (x,y) → token_number
-    # 6. Create token_decoding: token_number → (x,y)
-    raise NotImplementedError("TODO: Implement 2D coordinate ↔ token mapping system")
+    # Find initial generation (like your working version)
+    for i in range(args.max_epochs):
+        if not os.path.isfile(log_prefix + f"training_sets/N{N}_gen{i}.txt"):
+            break
+    initial_gen = i
     
-    # ========================================================================
-    # MAIN TRAINING LOOP (mostly unchanged)
-    # ========================================================================
-    for generation in range(args.initial_gen, args.max_epochs + 1):
-        logger.info(f"=== GENERATION {generation} ===")
+    if initial_gen > 0:
+        initial_gen = initial_gen - 1  # first index for which we have training data
+    else:
+        # Generate initial training data (like your working version)
+        logger.info("Generating 0th generation of training data...")
+
+        training_path_root = args.dump_path + f'/training_sets/N{N}_gen{initial_gen}'
+        training_path = training_path_root + '.txt'
+
+        constructions_log = []
+        best_constructions_per_batch = int(args.batch_size * args.keep_best_fraction)
         
-        # Phase 1: Train neural network on current training data
-        input_file = args.dump_path + f"/training_sets/N{N}_gen{generation}.txt"
-        
-        if not os.path.exists(input_file):
-            logger.info(f"Creating initial random training data: {input_file}")
-            
-            # TODO: Create initial random training data using your constraint class
-            # Flow:
-            # 1. Create constraint solver instance
-            # 2. Call saturate() to generate random valid constructions
-            # 3. Convert constructions to token sequences
-            # 4. Save to file for neural network training
-            initial_solver = NoThreeInLine(
-                batch_size=args.batch_size, 
-                grid_size=N, 
-                max_points=args.max_points, 
+        t0 = time.time()
+
+        for _ in range(int(args.target_training_size / best_constructions_per_batch)):
+            # Create initial random data
+            no_three = NoThreeInLine(
+                batch_size=args.batch_size,
+                grid_size=args.grid_size,
+                max_points=args.max_points,
                 device=args.device
             )
-            # TODO: Implement the rest of initial data generation
-            raise NotImplementedError("TODO: Generate initial 2D training data")
+            no_three.saturate()
+
+            # sort according to number of points
+            x = torch.argsort(no_three.current_counts, descending=True)
+            top_constructions = ((no_three.current_constructions[x[0:best_constructions_per_batch]] == 1) * 1).cpu()
+
+            constructions_log += no_three.current_counts.int().tolist()
+
+            # Convert constructions to token sequences and save
+            out_string = ''
+            out_string_unpermuted = ''
+            if args.symmetrize:
+                for construction in top_constructions:
+                    # Save unpermuted version first
+                    indices = torch.nonzero(construction)
+                    if indices.numel() > 0:
+                        encoding = token_encoding[indices[:, 0], indices[:, 1]]
+                        sorted_encoding = torch.sort(encoding)[0]
+                        encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
+                        out_string_unpermuted += encoding_string
+
+                    for symmetric_construction in generate_2d_symmetries(construction):
+                        indices = torch.nonzero(symmetric_construction)
+                        if indices.numel() > 0:
+                            encoding = token_encoding[indices[:, 0], indices[:, 1]]
+                            sorted_encoding = torch.sort(encoding)[0]
+                            encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
+                            out_string += encoding_string
+            else:
+                for construction in top_constructions:
+                    indices = torch.nonzero(construction)
+                    if indices.numel() > 0:
+                        encoding = token_encoding[indices[:, 0], indices[:, 1]]
+                        sorted_encoding = torch.sort(encoding)[0]
+                        encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
+                        out_string += encoding_string
+
+            with open(training_path, 'a') as f:
+                f.write(out_string)
+
+            if args.symmetrize:
+                with open(training_path_root + '_unpermuted.txt', 'a') as f:
+                    f.write(out_string_unpermuted)
+
+        if args.device == "cuda":
+            logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
+        elif args.device == "mps":
+            logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
+        logger.info(f"Generated {len(constructions_log)} constructions.")
+        logger.info(f"Generation took {time.time()-t0:.2f} seconds.")
+        logger.info(f"Distribution of counts = {Counter(constructions_log)}")
+
+    assert os.path.isfile(log_prefix + f"training_sets/N{N}_gen{initial_gen}.txt")
+
         
-        # Create datasets and train neural network (unchanged)
-        # TODO: Update token count for 2D problem (N*N instead of N*N*N)
-        train_dataset, test_dataset = create_datasets(input_file, force_tokens=N*N)
+
+    logger.info(f"initializing at generation: {initial_gen}")
+    input_file = args.dump_path + f"/training_sets/N{N}_gen{initial_gen}.txt"
+    train_dataset, test_dataset = create_datasets(input_file, force_tokens=N**2)
+    vocab_size = train_dataset.get_vocab_size()
+    block_size = args.max_points + 1
+    logger.info(f"dataset determined that: {vocab_size=}, {block_size=}")
+
+    config = ModelConfig(vocab_size=vocab_size, block_size=block_size,
+                    n_layer=args.n_layer, n_head=args.n_head,
+                    n_embd=args.n_embd, n_embd2=args.n_embd2)
+    
+    if args.type == 'transformer':
+        model = Transformer(config)
+    elif args.type == 'bigram':
+        model = Bigram(config)
+    elif args.type == 'mlp':
+        model = MLP(config)
+    elif args.type == 'rnn':
+        model = RNN(config, cell_type='rnn')
+    elif args.type == 'gru':
+        model = RNN(config, cell_type='gru')
+    elif args.type == 'bow':
+        model = BoW(config)
+    else:
+        logger.error(f'model type {args.type} is not recognized')
+    model.to(args.device)
+    logger.info(f"model #params: {sum(p.numel() for p in model.parameters())}")
+    model_path = os.path.join(args.dump_path, "model.pt")
+    if os.path.isfile(model_path): # Note: if we sample-only then we also assume we are resuming
+        logger.info("resuming from existing model")
+        model.load_state_dict(torch.load(model_path))
+    # ========================================================================
+    # MAIN TRAINING LOOP (matching your working version structure)
+    # ========================================================================
+    for generation in range(initial_gen, args.max_epochs):
+        logger.info(f"============ Start of generation {generation} ============")
+        if args.device == "cuda":
+            logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
+        elif args.device == "mps":
+            logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
+
+        input_file = args.dump_path + f"/training_sets/N{N}_gen{generation}.txt"
+        train_dataset, test_dataset = create_datasets(input_file,force_tokens=N**2)
+        vocab_size = train_dataset.get_vocab_size()
+        block_size = args.max_points + 1
+        logger.info(f"dataset determined that: {vocab_size=}, {block_size=}")
+
+        config = ModelConfig(vocab_size=vocab_size, block_size=block_size,
+                    n_layer=args.n_layer, n_head=args.n_head,
+                    n_embd=args.n_embd, n_embd2=args.n_embd2)
+    
+        if args.type == 'transformer': model = Transformer(config)
+        elif args.type == 'bigram': model = Bigram(config)
+        elif args.type == 'mlp': model = MLP(config)
+        elif args.type == 'rnn': model = RNN(config, cell_type='rnn')
+        elif args.type == 'gru': model = RNN(config, cell_type='gru')
+        elif args.type == 'bow': model = BoW(config)
+        else: logger.error(f'model type {args.type} is not recognized')
         
-        logger.info(f"Training dataset size: {len(train_dataset)}")
-        logger.info(f"Vocabulary size: {train_dataset.vocab_size}")
-        
-        # Initialize model (unchanged)
-        model_config = ModelConfig(
-            vocab_size=train_dataset.vocab_size,
-            sequence_length=train_dataset.get_output_length(),
-            device=args.device,
-            type=args.type
-        )
-        
-        if args.type == 'transformer':
-            model = Transformer(model_config)
-        elif args.type == 'bigram':
-            model = Bigram(model_config)
-        elif args.type == 'mlp':
-            model = MLP(model_config)
-        elif args.type == 'rnn':
-            model = RNN(model_config)
-        elif args.type == 'bow':
-            model = BoW(model_config)
-        
-        model = model.to(args.device)
-        logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
-        
-        # Train the model (unchanged)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-        batch_loader = InfiniteDataLoader(train_dataset, batch_size=args.batch_size, device=args.device)
-        
+        model.to(args.device)
+        logger.info(f"model #params: {sum(p.numel() for p in model.parameters())}")
+        model_path = os.path.join(args.dump_path, "model.pt")
+        if os.path.isfile(model_path):
+            logger.info("resuming from existing model")
+            model.load_state_dict(torch.load(model_path))
+
+        logger.info(f"training on {input_file}")
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay, betas=(0.9, 0.99), eps=1e-8)
+
+        batch_loader = InfiniteDataLoader(train_dataset, batch_size=args.nn_batch_size, pin_memory=True, num_workers=args.num_workers)
+
+        # training loop
+        best_loss = None
         step = 0
-        while step < args.max_steps:
+        t_training = time.time()
+        while True:
+            t0 = time.time()
+
+            # get the next batch, ship to device, and unpack it to input and target
             batch = batch_loader.next()
+            batch = [t.to(args.device) for t in batch]
             X, Y = batch
-            
-            # Forward pass
+
+            # feed into the model
             logits, loss = model(X, Y)
-            
-            # Backward pass
-            optimizer.zero_grad()
+
+            # calculate the gradient, update the weights
+            model.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
-            
-            # Logging
-            if step % args.sample_every == 0:
-                logger.info(f"Step {step}, Loss: {loss.item():.4f}")
-            
+
+            if args.device == "cuda": torch.cuda.synchronize()
+            elif args.device == "mps": torch.mps.synchronize()
+            t1 = time.time()
+
+            # logging
+            if step % 100 == 0:
+                logger.info(f"step {step} | loss {loss.item():.4f} | step time {(t1-t0)*1000:.2f}ms")
+
+            # evaluate the model
+            if step > 0 and step % 500 == 0:
+                train_loss = evaluate(model, train_dataset, args.device, batch_size=100, max_batches=10)
+                test_loss  = evaluate(model, test_dataset,  args.device, batch_size=100, max_batches=10)
+                logger.info(f"step {step} train loss: {train_loss} test loss: {test_loss}")
+                # save the model to disk if it has improved
+                if best_loss is None or test_loss < best_loss:
+                    out_path = os.path.join(args.dump_path, "model.pt")
+                    logger.info(f"test loss {test_loss} is the best so far, saving model to {out_path}")
+                    torch.save(model.state_dict(), out_path)
+                    best_loss = test_loss
+                    
             step += 1
+            if args.max_steps >= 0 and step >= args.max_steps:
+                break
+        logger.info(f"training took {time.time()-t_training:.2f} seconds")
+        if args.device == "cuda":
+            logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
+        elif args.device == "mps":
+            logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
+
+        t_generating = time.time()
+        logger.info('generating new samples...')
+        sample_batch_size = args.gen_batch_size
+        todo = int(args.target_training_size * (1/args.keep_best_fraction))
         
-        logger.info(f"Training completed. Final loss: {loss.item():.4f}")
-        
-        # Phase 2: Generate new sequences using trained model (unchanged)
-        logger.info("Generating new sequences...")
-        todo = int(args.target_training_size * 1/args.keep_best_fraction)
-        sample_batch_size = min(todo, 1000)
-        
-        # Clear previous samples
+        # Clear previous samples and generate new ones
         write_samples(model, train_dataset, num=0, new_file=True)
+        generated_count = 0
+        while generated_count < todo:
+            num_to_gen = min(sample_batch_size, todo - generated_count)
+            write_samples(model, train_dataset, num=num_to_gen)
+            generated_count += num_to_gen
+
+        logger.info(f"generation took {time.time()-t_generating:.2f} seconds")
+        logger.info('decoding and fixing')
         
-        while sample_batch_size < todo:
-            write_samples(model, train_dataset, num=sample_batch_size)
-            todo = todo - sample_batch_size
-        
-        # Phase 3: Test sequences and create next generation training data
+        if args.device in ["mps", "cuda"]:
+            torch.mps.empty_cache() if args.device == "mps" else torch.cuda.empty_cache()
+            
         if generation < args.max_epochs:
-            # TODO: token_decoding needs to be defined before this call
-            decode_and_fix(args, token_decoding=token_decoding, generation=generation+1)
+            decode_and_fix(args, token_decoding=token_decoding, token_encoding=token_encoding, generation=generation+1)
         
-        logger.info(f"Generation {generation} completed")
+        if args.device in ["mps", "cuda"]:
+            mem_allocated = torch.mps.current_allocated_memory() if args.device == "mps" else torch.cuda.memory_allocated(0)
+            logger.info(f"Memory allocated: {mem_allocated/(1024*1024):.2f}MB")
+        logger.info(f"============ End of generation {generation} ============")
     
     logger.info("All generations completed!")

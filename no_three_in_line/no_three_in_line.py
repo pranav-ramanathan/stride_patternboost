@@ -16,7 +16,7 @@ class NoThreeInLine:
     def __post_init__(self):
         N = self.N = self.grid_size
         assert self.grid_size < 64, "Grid size must fit in int8 coordinate."
-        assert self.max_points <= 2*N, "max_points should be less than or equal to 2*N."
+        assert self.max_points < 2*N + 1, "max_points should be less than or equal to 2*N + 1."
 
         # self.current_constructions: An (N, N) grid for each batch item.
         # Value `1` marks a placed point, `0` is empty, `-1` is forbidden. This is for fast
@@ -51,6 +51,9 @@ class NoThreeInLine:
             device=self.device,
         )
 
+        # cache for pair indices used in collinearity checks
+        self._pair_cache = {}
+
     def add_points(self, points, verbose=True):
         """
         Add points to constructions, updating internal state.
@@ -68,13 +71,14 @@ class NoThreeInLine:
         points = points.to(dtype=torch.int8, device=self.device)
         points_int = points.to(dtype=torch.int)  # For indexing
 
+        # Create a mask for non-null points (i.e., rows that really add something)
+        non_null_mask = (points != self.null_tensor).any(dim=-1)
+
         # Assertions for safety
         assert points.shape[0] == self.batch_size
-        assert torch.max(self.current_counts).item() < self.max_points
+        if non_null_mask.any():
+            assert torch.max(self.current_counts[non_null_mask]).item() < self.max_points
         assert (-1 <= points).all() and (points < self.N).all()
-
-        # Create a mask for non-null points
-        non_null_mask = (points != self.null_tensor).any(dim=-1)
 
         # Get indices for all batches and for only non-null ones
         batch_indices_all = torch.arange(self.batch_size, device=self.device)
@@ -162,7 +166,12 @@ class NoThreeInLine:
         good_bools &= ~is_occupied
 
         # 2. Collinearity check (vectorized)
-        for cur_count in range(2, self.max_points):
+        # Only iterate over counts that actually occur (>1)
+        unique_counts = torch.unique(self.current_counts)
+
+        for cur_count in unique_counts.tolist():
+            if cur_count < 2:
+                continue
             # Find all constructions that currently have `cur_count` points
             batch_mask = (self.current_counts == cur_count)
             if not batch_mask.any():
@@ -175,8 +184,10 @@ class NoThreeInLine:
             existing_points = self.points_list[batch_indices] # (num_batches, max_points, 2)
             candidates = new_points[batch_indices]            # (num_batches, num_candidates, 2)
             
-            # Create all pairs of existing points
-            pair_indices = torch.combinations(torch.arange(cur_count), r=2) # (num_pairs, 2)
+            # Retrieve or compute cached pair indices for this cur_count
+            if cur_count not in self._pair_cache:
+                self._pair_cache[cur_count] = torch.combinations(torch.arange(cur_count), r=2)
+            pair_indices = self._pair_cache[cur_count].to(self.device)  # (num_pairs, 2)
             p1s = existing_points[:, pair_indices[:, 0]] # (num_batches, num_pairs, 2)
             p2s = existing_points[:, pair_indices[:, 1]] # (num_batches, num_pairs, 2)
 
@@ -212,28 +223,6 @@ class NoThreeInLine:
 
         return good_bools
 
-    def are_collinear_2d(self, p1, p2, p3):
-        """
-        Check if three 2D points (x,y) are collinear.
-        
-        TODO: Implement 2D collinearity test
-        Flow:
-        1. Three points are collinear if they lie on the same straight line
-        2. Equivalent: area of triangle formed by the three points is zero
-        3. Triangle area formula: 0.5 * |x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2)|
-        4. Points collinear ⟺ area = 0 ⟺ expression inside |...| equals zero
-        5. Use small tolerance (e.g., 1e-10) for floating point comparison
-        
-        Args:
-            p1, p2, p3: tuples or lists of (x, y) coordinates
-        Returns:
-            bool: True if points are collinear, False otherwise
-        """
-
-        x1, y1 = p1
-        x2, y2 = p2
-        x3, y3 = p3
-        return (x1*(y2 - y3) + x2*(y3 - y1) + x3*(y1 - y2)) == 0
 
     def possible_additions(self, shuffle=False):
         """
@@ -307,6 +296,7 @@ class NoThreeInLine:
 
         return current_proposals
     
+    @torch.no_grad()
     def saturate(self):
         """
         Complete all constructions randomly until addition of any more points is impossible.
@@ -343,8 +333,8 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 37
-    solver = NoThreeInLine(batch_size=100, grid_size=N, max_points=2*N)
+    N = 11
+    solver = NoThreeInLine(batch_size=1000000, grid_size=N, max_points=2*N)
     t0 = time.time()
     solver.saturate()
     t1 = time.time()
@@ -363,16 +353,16 @@ if __name__ == "__main__":
 
 
 
-    # # Print all constructions in the batch
-    # if solver.batch_size > 0:
-    #     # Find top 5 constructions by point count
-    #     top_indices = torch.topk(solver.current_counts, min(5, solver.batch_size)).indices
+    # Print all constructions in the batch
+    if solver.batch_size > 0:
+        # Find top 5 constructions by point count
+        top_indices = torch.topk(solver.current_counts, min(1, solver.batch_size)).indices
         
-    #     print("\n--- Top Final Constructions ---")
-    #     for i, idx in enumerate(top_indices):
-    #         construction = solver.current_constructions[idx]
-    #         num_points = solver.current_counts[idx].item()
-    #         print_grid(
-    #             construction,
-    #             title=f"\nTop Construction #{i+1} (found {num_points} points on a {solver.N}x{solver.N} grid)"
-    #         )
+        print("\n--- Top Final Constructions ---")
+        for i, idx in enumerate(top_indices):
+            construction = solver.current_constructions[idx]
+            num_points = solver.current_counts[idx].item()
+            print_grid(
+                construction,
+                title=f"\nTop Construction #{i+1} (found {num_points} points on a {solver.N}x{solver.N} grid)"
+            )

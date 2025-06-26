@@ -102,3 +102,7 @@ logs/
 checkpoint/*
 
 TODO
+
+explanations/*
+
+training/*
