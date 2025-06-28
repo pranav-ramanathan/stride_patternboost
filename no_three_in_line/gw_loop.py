@@ -1,31 +1,21 @@
-#!/usr/bin/env python3
-"""
-PatternBoost skeleton for no-three-in-line problem.
-
-TODO: Replace all sphere-specific logic with no-three-in-line constraint.
-Most of the file can stay the same - only geometric constraint changes.
-"""
-
-import os, sys, time, math, argparse
-from dataclasses import dataclass
-from typing import List
+import os, time, argparse
 import pprint, logging
 from collections import Counter
-import itertools, shutil
+import shutil
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn.functional as F
+import random
 
 from makemoretokens import ModelConfig, CharDataset, Transformer, Bigram, MLP, RNN, BoW, InfiniteDataLoader, evaluate, generate, print_samples
 
-# ============================================================================
-# TODO: Import your constraint class instead of NoSphereSimple
-# ============================================================================
+
 from no_three_in_line import NoThreeInLine
 
 def get_parser():
     parser = argparse.ArgumentParser('PatternBoost for no-three-in-line')
 
-    # ========================================================================
-    # TODO: Adjust default parameters for no-three-in-line problem
-    # ========================================================================
     parser.add_argument('--grid_size', type=int, default=6, help='Grid size for 2D no-three-in-line (creates NxN grid)')
     parser.add_argument('--batch_size', type=int, default=500, help='Generate and process samples in batches of this size')
     parser.add_argument('--max_points', type=int, default=18, help='max points which can be added to construction')
@@ -111,22 +101,13 @@ def create_datasets(input_file, force_tokens=-1):
 def write_samples(model, train_dataset, num=10, new_file=False, use_logger=False):
     """ samples from the model and writes them to file 
     
-    TODO: This function uses undefined variables (model, train_dataset, args)
-    These will be defined in the main training loop where this function is called
-    
     Flow:
     1. Use trained neural network to generate token sequences
     2. Start with <START> token, generate until <END> token or max length
     3. Convert token numbers back to "V1,V5,V12" format
     4. Write sequences to out.txt for decode_and_fix() to process
     """
-    # TODO: These variables need to be defined in calling scope:
-    # - model: trained neural network
-    # - train_dataset: dataset with decode() method  
-    # - args: command line arguments
-    
     if args.type == 'bigram':
-        # TODO: Handle bigram model sampling
         samples = []
         for _ in range(num):
             out = []
@@ -201,7 +182,6 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
     Core algorithm: Read neural network samples, convert to geometric constructions,
     test them with no-three-in-line constraint, and save the best ones.
     
-    TODO: Adapt coordinate handling for 2D problem
     Flow:
     1. Read token sequences from out.txt: ["V1,V5,V12", "V3,V8,V15", ...]
     2. Convert tokens to 2D coordinates using token_decoding mapping
@@ -232,9 +212,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
     # Efficient histogram accumulators (CPU tensors)
     hist_pre = torch.zeros(args.max_points + 1, dtype=torch.int64)
     hist_post = torch.zeros(args.max_points + 1, dtype=torch.int64)
-    # timing accumulators
-    times_adding_points = []  # seconds per batch for adding points
-    times_saturating = []     # seconds per batch for saturate
+
     
     # Global deduplication across all batches
     unique_encodings = set()
@@ -244,10 +222,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         batch_idx += 1
         cur_batch_size = min(args.batch_size, len(sampled_tokens)-b)
         
-        # ====================================================================
-        # TODO: Use no-three-in-line constraint instead of sphere constraint
-        # ====================================================================
-        no_three = NoThreeInLine(
+        nothreeinline = NoThreeInLine(
             batch_size=cur_batch_size, 
             grid_size=N, 
             max_points=args.max_points, 
@@ -257,63 +232,44 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         current_batch = sampled_tokens[b:b+cur_batch_size]
         
         # Try adding points suggested by neural network
-        # TODO: Handle coordinate conversion from tokens to 2D positions
         max_length = max(len(seq) for seq in current_batch)
         t_add0 = time.time()
         for i in range(max_length):
-            # TODO: Create coordinate tensor appropriate for 2D problem
             # Flow: 
             # 1. For each batch, get the i-th token in the sequence
             # 2. Convert token number to (x,y) coordinate using token_decoding
             # 3. Handle missing tokens (sequences of different lengths)
-            # 4. Pass coordinates to no_three.try_to_add_points()
+            # 4. Pass coordinates to nothreeinline.try_to_add_points()
             
-            # HINT: Use something like:
-            # points = -1 * torch.ones((cur_batch_size, 2), dtype=torch.int8, device=args.device)
-            # for j in range(cur_batch_size):
-            #     if i < len(current_batch[j]):
-            #         token_num = current_batch[j][i]
-            #         if token_num < len(token_decoding):
-            #             points[j] = token_decoding[token_num]
-            # no_three.try_to_add_points(points)
-
             points = -1 * torch.ones((cur_batch_size, 2), dtype=torch.int8, device=args.device)
             for j in range(cur_batch_size):
                 if i < len(current_batch[j]):
                     token_num = current_batch[j][i]
                     if token_num < len(token_decoding):
                         points[j] = token_decoding[token_num]
-            no_three.try_to_add_points(points)
+            nothreeinline.try_to_add_points(points)
             
         t_add1 = time.time()
-        times_adding_points.append(t_add1 - t_add0)
         
         # Record points added from neural network suggestions
-        total_pre_sat += torch.sum(no_three.current_counts.float()).item()
+        total_pre_sat += torch.sum(nothreeinline.current_counts.float()).item()
         # Update histogram efficiently
-        counts_cpu = no_three.current_counts.cpu().int()
+        counts_cpu = nothreeinline.current_counts.cpu().int()
         hist_pre += torch.bincount(counts_cpu, minlength=args.max_points + 1)
         
         t_sat0 = time.time()
-        no_three.saturate()  # Complete constructions greedily
+        nothreeinline.saturate()  # Complete constructions greedily
         t_sat1 = time.time()
-        times_saturating.append(t_sat1 - t_sat0)
-        
         # Record final point counts
-        total_post_sat += torch.sum(no_three.current_counts.float()).item()
-        counts_cpu_post = no_three.current_counts.cpu().int()
+        total_post_sat += torch.sum(nothreeinline.current_counts.float()).item()
+        counts_cpu_post = nothreeinline.current_counts.cpu().int()
         hist_post += torch.bincount(counts_cpu_post, minlength=args.max_points + 1)
         
         # Keep only the best constructions (unchanged logic)
-        x = torch.argsort(no_three.current_counts, descending=True)
+        x = torch.argsort(nothreeinline.current_counts, descending=True)
         best_constructions_per_batch = int(args.batch_size * args.keep_best_fraction)
         
-        # TODO: Extract the best constructions after saturation.
-        #  1. Use `torch.argsort` on `no_three.current_counts` to get the indices of the best constructions.
-        #  2. Select the top `best_constructions_per_batch` indices.
-        #  3. Use these indices to get the corresponding construction grids from `no_three.current_constructions`.
-        #  4. Ensure the resulting `top_constructions` tensor is on the CPU for further processing.
-        top_constructions = ((no_three.current_constructions[x[0:best_constructions_per_batch]] == 1) * 1).cpu()
+        top_constructions = ((nothreeinline.current_constructions[x[0:best_constructions_per_batch]] == 1) * 1).cpu()
         
         # Apply symmetries to increase training data
         if args.symmetrize:
@@ -333,13 +289,6 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
 
         else:
             for construction in top_constructions:
-                
-                # indices = torch.nonzero(construction)
-                # if indices.numel() > 0:
-                #     encoding = token_encoding[indices[:, 0], indices[:, 1]]
-                #     encoding_string = ','.join([f'V{tok}' for tok in encoding]) + '\n'
-                #     out_string += encoding_string
-
                 indices = torch.nonzero(construction)
                 if indices.numel() > 0:
                     encoding = token_encoding[indices[:, 0], indices[:, 1]]
@@ -354,6 +303,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         f.write(out_string)
     
     logger.info(f"Generation {generation-1} -> {generation}")
+    logger.info(f"Max number of points in a construction: {torch.max(nothreeinline.current_counts).item()}")
     logger.info(f"Neural network contributed {total_pre_sat} points")
     logger.info(f"Saturation added {total_post_sat - total_pre_sat} more points")
     logger.info(f"Total points in final constructions: {total_post_sat}")
@@ -366,24 +316,53 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
     # Convert histograms to Counter for logging
     all_counts_pre_ctr = Counter({i:int(v) for i,v in enumerate(hist_pre.tolist()) if v != 0})
     all_counts_post_ctr = Counter({i:int(v) for i,v in enumerate(hist_post.tolist()) if v != 0})
+    
+    # --- New Plotting Logic ---
+    scores = np.arange(max(len(hist_pre), len(hist_post)))
+
+    # Pad the shorter histogram with zeros to ensure they are the same length
+    pre_counts = np.pad(hist_pre.tolist(), (0, len(scores) - len(hist_pre)), 'constant')
+    post_counts = np.pad(hist_post.tolist(), (0, len(scores) - len(hist_post)), 'constant')
+
+    plt.figure(figsize=(12, 6))
+
+    # Plot filled area charts for visual weight
+    plt.fill_between(scores, pre_counts, color="skyblue", alpha=0.4, label='Pre-Saturation')
+    plt.fill_between(scores, post_counts, color="red", alpha=0.4, label='Post-Saturation')
+
+    # Plot lines on top to clearly see the peaks
+    plt.plot(scores, pre_counts, color="blue", alpha=0.8, linewidth=2, linestyle='--')
+    plt.plot(scores, post_counts, color="red", alpha=0.8, linewidth=2)
+
+    plt.title(f'Score Distribution Comparison (Gen {generation})', fontsize=16)
+    plt.xlabel('Score', fontsize=12)
+    plt.ylabel('Count', fontsize=12)
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.legend()
+    plt.tight_layout()
+
+    # Save the figure
+    histogram_path = os.path.join(args.dump_path, f'score_distribution_gen{generation}.png')
+    plt.savefig(histogram_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"Score distribution histogram saved to {histogram_path}")
+    # --- End New Plotting Logic ---
+
     logger.info(f"score distribution before saturation: {all_counts_pre_ctr}")
     logger.info(f"score distribution after  saturation: {all_counts_post_ctr}")
-    if times_adding_points:
-        logger.info(f"adding_average_time={sum(times_adding_points)/len(times_adding_points):.2f}s, saturating_average_time={sum(times_saturating)/len(times_saturating):.2f}s")
 
     # Clean up out.txt file (matching no_spheres behavior)
     shutil.os.remove(args.dump_path + '/out.txt')
 
 if __name__ == '__main__':
-    import torch
-    import torch.nn.functional as F
-    import numpy as np
-    import random
-    
-    # Parse arguments (unchanged)
+    start_time = time.time()
     parser = get_parser()
     args = parser.parse_args()
     
+    # Always put output in training/<dump_path>
+    args.dump_path = f"training/{os.path.basename(args.dump_path)}"
+
     # Setup logging and directories (matching your working version)
     log_prefix = args.dump_path + "/"
     if not os.path.exists(log_prefix):
@@ -470,19 +449,19 @@ if __name__ == '__main__':
 
         for _ in range(int(args.target_training_size / best_constructions_per_batch)):
             # Create initial random data
-            no_three = NoThreeInLine(
+            nothreeinline = NoThreeInLine(
                 batch_size=args.batch_size,
                 grid_size=args.grid_size,
                 max_points=args.max_points,
                 device=args.device
             )
-            no_three.saturate()
+            nothreeinline.saturate()
 
             # sort according to number of points
-            x = torch.argsort(no_three.current_counts, descending=True)
-            top_constructions = ((no_three.current_constructions[x[0:best_constructions_per_batch]] == 1) * 1).cpu()
+            x = torch.argsort(nothreeinline.current_counts, descending=True)
+            top_constructions = ((nothreeinline.current_constructions[x[0:best_constructions_per_batch]] == 1) * 1).cpu()
 
-            constructions_log += no_three.current_counts.int().tolist()
+            constructions_log += nothreeinline.current_counts.int().tolist()
 
             # Convert constructions to token sequences and save
             out_string = ''
@@ -566,12 +545,17 @@ if __name__ == '__main__':
     # ========================================================================
     # MAIN TRAINING LOOP (matching your working version structure)
     # ========================================================================
+    batch_loader = None  # Track the batch loader to ensure proper cleanup
     for generation in range(initial_gen, args.max_epochs):
         logger.info(f"============ Start of generation {generation} ============")
         if args.device == "cuda":
             logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
         elif args.device == "mps":
             logger.info(f"Memory allocated:  {torch.mps.current_allocated_memory()/(1024*1024):.2f}MB")
+
+        # Shutdown the previous batch loader before creating a new one
+        if batch_loader is not None and hasattr(batch_loader, 'shutdown'):
+            batch_loader.shutdown()
 
         input_file = args.dump_path + f"/training_sets/N{N}_gen{generation}.txt"
         train_dataset, test_dataset = create_datasets(input_file,force_tokens=N**2)
@@ -612,7 +596,7 @@ if __name__ == '__main__':
             t0 = time.time()
 
             # get the next batch, ship to device, and unpack it to input and target
-            batch = batch_loader.next()
+            batch = next(batch_loader)
             batch = [t.to(args.device) for t in batch]
             X, Y = batch
 
@@ -646,8 +630,23 @@ if __name__ == '__main__':
                     
             step += 1
             if args.max_steps >= 0 and step >= args.max_steps:
+                train_loss = evaluate(model, train_dataset, args.device, batch_size=100, max_batches=10)
+                test_loss  = evaluate(model, test_dataset,  args.device, batch_size=100, max_batches=10)
+                logger.info(f"step {step} (final) train loss: {train_loss} test loss: {test_loss}")
+                # save the model to disk if it has improved
+                if best_loss is None or test_loss < best_loss:
+                    out_path = os.path.join(args.dump_path, "model.pt")
+                    logger.info(f"test loss {test_loss} is the best so far, saving model to {out_path}")
+                    torch.save(model.state_dict(), out_path)
+                    best_loss = test_loss
                 break
+        
         logger.info(f"training took {time.time()-t_training:.2f} seconds")
+        
+        # Shutdown the dataloader to prevent file descriptor leaks from worker processes
+        if hasattr(batch_loader, 'shutdown'):
+            batch_loader.shutdown()
+        
         if args.device == "cuda":
             logger.info(f"Memory allocated:  {torch.cuda.memory_allocated(0)/(1024*1024):.2f}MB, reserved: {torch.cuda.memory_reserved(0)/(1024*1024):.2f}MB")
         elif args.device == "mps":
@@ -681,3 +680,10 @@ if __name__ == '__main__':
         logger.info(f"============ End of generation {generation} ============")
     
     logger.info("All generations completed!")
+    
+    # Final cleanup - shutdown the last batch loader
+    if batch_loader is not None and hasattr(batch_loader, 'shutdown'):
+        batch_loader.shutdown()
+
+    end_time = time.time()
+    logger.info(f"Total time: {end_time - start_time:.2f} seconds")

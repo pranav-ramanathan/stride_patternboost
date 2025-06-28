@@ -658,22 +658,53 @@ def create_eval_dataset(input_file):
 
 class InfiniteDataLoader:
     """
-    this is really hacky and I'm not proud of it, but there doesn't seem to be
-    a better way in PyTorch to just create an infinite dataloader?
+    A simple wrapper for a PyTorch DataLoader that allows for infinite iteration.
     """
-
     def __init__(self, dataset, **kwargs):
-        train_sampler = torch.utils.data.RandomSampler(dataset, replacement=True, num_samples=int(1e10))
-        self.train_loader = DataLoader(dataset, sampler=train_sampler, **kwargs)
+        self.train_loader = DataLoader(
+            dataset,
+            sampler=torch.utils.data.RandomSampler(dataset, replacement=True, num_samples=int(1e10)),
+            shuffle=False,
+            **kwargs,
+        )
         self.data_iter = iter(self.train_loader)
 
-    def next(self):
+    def __iter__(self):
+        return self
+
+    def __next__(self):
         try:
             batch = next(self.data_iter)
-        except StopIteration: # this will technically only happen after 1e10 samples... (i.e. basically never)
+        except StopIteration:
+            # this might happen if the dataloader ends somehow.
             self.data_iter = iter(self.train_loader)
             batch = next(self.data_iter)
         return batch
+
+    def shutdown(self):
+        # Shutdown the DataLoader workers to prevent resource leaks
+        # This is especially important in a long-running process with loops,
+        # where DataLoaders are created repeatedly.
+        try:
+            # Try multiple approaches to shutdown workers
+            if hasattr(self.train_loader, '_shutdown_workers'):
+                self.train_loader._shutdown_workers()
+            elif hasattr(self.data_iter, '_shutdown_workers'):
+                self.data_iter._shutdown_workers()
+            
+            # Also try to manually close the iterator
+            if hasattr(self.data_iter, '_workers') and self.data_iter._workers:
+                for worker in self.data_iter._workers:
+                    if worker.is_alive():
+                        worker.terminate()
+                        worker.join(timeout=1.0)
+                        
+            # Force garbage collection to clean up any remaining references
+            import gc
+            gc.collect()
+        except Exception as e:
+            # Don't let shutdown errors crash the program
+            print(f"Warning: Error during batch_loader shutdown: {e}")
 
 # -----------------------------------------------------------------------------
 if __name__ == '__main__':
@@ -773,7 +804,7 @@ if __name__ == '__main__':
         t0 = time.time()
 
         # get the next batch, ship to device, and unpack it to input and target
-        batch = batch_loader.next()
+        batch = next(batch_loader)
         batch = [t.to(args.device) for t in batch]
         X, Y = batch
 
@@ -818,4 +849,7 @@ if __name__ == '__main__':
         # termination conditions
         if args.max_steps >= 0 and step >= args.max_steps:
             break
+
+    # shutdown the dataloader to ensure that worker processes are terminated
+    batch_loader.shutdown()
 

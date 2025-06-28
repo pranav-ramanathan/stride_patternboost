@@ -333,7 +333,7 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 11
+    N = 12
     solver = NoThreeInLine(batch_size=1000000, grid_size=N, max_points=2*N)
     t0 = time.time()
     solver.saturate()
