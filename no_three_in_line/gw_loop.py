@@ -8,6 +8,15 @@ import torch
 import torch.nn.functional as F
 import random
 
+from rich.logging import RichHandler
+from rich.progress import (
+    Progress,
+    BarColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    MofNCompleteColumn,
+)
+
 from makemoretokens import ModelConfig, CharDataset, Transformer, Bigram, MLP, RNN, BoW, InfiniteDataLoader, evaluate, generate, print_samples
 
 
@@ -375,16 +384,16 @@ if __name__ == '__main__':
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     logger.handlers = []  # Clear any existing handlers
-    
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    fh = logging.FileHandler(log_prefix + 'program-exp.log')
+
+    # Configure file handler
+    fh = logging.FileHandler(log_prefix + "program-exp.log")
     fh.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     fh.setFormatter(formatter)
-    logger.addHandler(ch)
     logger.addHandler(fh)
+
+    # Configure console handler using rich
+    logger.addHandler(RichHandler(rich_tracebacks=True, show_path=False))
 
     # Set device with proper MPS support
     if args.device == "auto":
@@ -659,11 +668,21 @@ if __name__ == '__main__':
         
         # Clear previous samples and generate new ones
         write_samples(model, train_dataset, num=0, new_file=True)
-        generated_count = 0
-        while generated_count < todo:
-            num_to_gen = min(sample_batch_size, todo - generated_count)
-            write_samples(model, train_dataset, num=num_to_gen)
-            generated_count += num_to_gen
+        
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task("[cyan]Generating samples...", total=todo)
+            generated_count = 0
+            while generated_count < todo:
+                num_to_gen = min(sample_batch_size, todo - generated_count)
+                write_samples(model, train_dataset, num=num_to_gen)
+                generated_count += num_to_gen
+                progress.update(task, advance=num_to_gen)
 
         logger.info(f"generation took {time.time()-t_generating:.2f} seconds")
         logger.info('decoding and fixing')

@@ -8,6 +8,7 @@ dependencies = [
     "matplotlib>=3.10.3",
     "networkx>=3.5",
     "numpy>=2.3.0",
+    "rich>=14.0.0",
     "sympy>=1.14.0",
     "tensorboard>=2.19.0",
     "tokenizers>=0.21.1",
