@@ -247,7 +247,6 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         
         # Try adding points suggested by neural network
         max_length = max(len(seq) for seq in current_batch)
-        t_add0 = time.time()
         for i in range(max_length):
             # Flow: 
             # 1. For each batch, get the i-th token in the sequence
@@ -263,7 +262,6 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
                         points[j] = token_decoding[token_num]
             nothreeinline.try_to_add_points(points)
             
-        t_add1 = time.time()
         
         # Record points added from neural network suggestions
         total_pre_sat += torch.sum(nothreeinline.current_counts.float()).item()
@@ -272,7 +270,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         hist_pre += torch.bincount(counts_cpu, minlength=args.max_points + 1)
         
 
-        nothreeinline.saturate()  # Complete constructions greedily
+        nothreeinline.greedy_saturate()  # Complete constructions greedily
         # Record final point counts
         total_post_sat += torch.sum(nothreeinline.current_counts.float()).item()
         counts_cpu_post = nothreeinline.current_counts.cpu().int()

@@ -309,38 +309,217 @@ class NoThreeInLine:
         """
         Complete all constructions greedily until addition of any more points is impossible.
         """
-        additions = self.possible_additions()
         for i in range(self.batch_size):
-            current_additions = additions[i]
-            num_additions = (current_additions != self.null_tensor).any(dim=-1).sum().item()
-
-            if num_additions == 0: continue
-
             current_grid = self.current_constructions[i].clone()
-            expanded_grids = current_grid.unsqueeze(0).repeat(num_additions, 1, 1)
+
+            while True:
+                # Find all empty spaces on the current grid
+                possible_points = self.available_spaces(current_grid)
+
+                if possible_points.shape[0] == 0:
+                    break  # No more empty spaces
+
+                # Set up the inputs for best_grid: one grid for each possible point
+                num_candidates = possible_points.shape[0]
+                expanded_grids = current_grid.unsqueeze(0).repeat(num_candidates, 1, 1)
+
+                # Find the best grid after trying all possible single-point additions
+                best_next_grid = self.best_grid(expanded_grids, possible_points)
+
+                # Check if we made progress
+                if (best_next_grid == 1).sum() > (current_grid == 1).sum():
+                    current_grid = best_next_grid
+                    # After adding a point, update the grid to mark any newly formed forbidden squares
+                    # We unsqueeze to add a temporary batch dimension for the vectorized function
+                    current_grid = self.update_forbidden_squares(current_grid.unsqueeze(0)).squeeze(0)
+                else:
+                    # No valid point could be added to improve the score, so we're done
+                    break
             
-            best_grid = self.best_grid(expanded_grids, current_additions)
-
-            self.current_constructions[i] = best_grid
-            self.current_counts[i] = (best_grid == 1).sum().item()
+            # Update the final construction and its point count
+            self.current_constructions[i] = current_grid
+            self.current_counts[i] = (current_grid == 1).sum().item()
             
 
-    def add_points_to_grid(self, grid, points):
+    def update_forbidden_squares(self, grids):
         """
+        For a batch of grids, this function updates each grid by marking newly 
+        forbidden squares with -1. This is the batched version.
         """
-        pass
+        point_counts = (grids == 1).sum(dim=(1, 2))
+        
+        unique_counts = torch.unique(point_counts)
 
-    def available_spaces(self, grids):
+        for count in unique_counts:
+            if count < 2:
+                continue
+                
+            # Identify all grids in the batch that have `count` points
+            count_mask = (point_counts == count)
+            group_indices = count_mask.nonzero(as_tuple=True)[0]
+            group_grids = grids[group_indices]
+            
+            # This part is tricky to vectorize fully because the number of empty
+            # squares can differ for each grid in the group. We iterate through 
+            # the grids within the group, which is still much better than iterating 
+            # through the entire batch.
+            
+            # Get existing points for all grids in the group at once
+            existing_nz = (group_grids == 1).nonzero(as_tuple=False)
+            if existing_nz.numel() == 0: continue
+            
+            # Reshape to (num_group_grids, count, 2)
+            existing_points = existing_nz[:, 1:].reshape(group_grids.shape[0], count.item(), 2)
+
+            # Generate pairs of points; this is the same for every grid in the group
+            pair_indices = torch.combinations(torch.arange(count.item(), device=self.device), r=2)
+            p1s = existing_points[:, pair_indices[:, 0]]  # (num_group_grids, num_pairs, 2)
+            p2s = existing_points[:, pair_indices[:, 1]]  # (num_group_grids, num_pairs, 2)
+            
+            # Iterate through the group to handle varying numbers of empty squares
+            for i, original_grid_idx in enumerate(group_indices):
+                grid_p1s = p1s[i]  # (num_pairs, 2)
+                grid_p2s = p2s[i]  # (num_pairs, 2)
+                
+                empty_squares = (grids[original_grid_idx] == 0).nonzero(as_tuple=False)
+                if empty_squares.shape[0] == 0:
+                    continue
+                
+                # Reshape for broadcasting
+                p3s = empty_squares.unsqueeze(0)  # (1, num_empty, 2)
+                
+                x1 = grid_p1s[:, 0].unsqueeze(1)
+                y1 = grid_p1s[:, 1].unsqueeze(1)
+                x2 = grid_p2s[:, 0].unsqueeze(1)
+                y2 = grid_p2s[:, 1].unsqueeze(1)
+                x3 = p3s[..., 0]
+                y3 = p3s[..., 1]
+                
+                # Check for collinearity
+                collinearity_check = x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)
+                is_collinear = (collinearity_check == 0).any(dim=0)
+                forbidden_points = empty_squares[is_collinear]
+                
+                if forbidden_points.numel() > 0:
+                    grids[original_grid_idx, forbidden_points[:, 0], forbidden_points[:, 1]] = -1
+                    
+        return grids
+
+    def add_points_to_grid(self, grids, points):
         """
+        Add points to grids simultaneously where point i is added to grid i.
+        
+        Args:
+            grids: tensor of shape (batch_size, N, N) 
+            points: tensor of shape (batch_size, 2) with coordinates to add
+        
+        Returns:
+            new_grids: tensor of shape (batch_size, N, N) with points added where valid
         """
-        pass
+        points = points.to(torch.int)
+        
+        # 1. Initial Filtering (null, bounds, occupancy)
+        non_null_mask = (points != self.null_tensor).any(dim=-1)
+        if not non_null_mask.any(): return grids
+        
+        batch_indices = torch.arange(grids.shape[0], device=self.device)[non_null_mask]
+        valid_points = points[non_null_mask]
+        valid_grids = grids[non_null_mask]
+        
+        x, y = valid_points[:, 0], valid_points[:, 1]
+        in_bounds = (x >= 0) & (x < self.N) & (y >= 0) & (y < self.N)
+        if not in_bounds.any(): return grids
+        
+        available = (valid_grids[torch.arange(valid_grids.shape[0]), x, y] == 0)
+        final_mask = in_bounds & available
+        if not final_mask.any(): return grids
+
+        # Apply final mask to get the set of grids and points we'll actually check
+        batch_indices = batch_indices[final_mask]
+        valid_points = valid_points[final_mask]
+        valid_grids = valid_grids[final_mask]
+        
+        # 2. Group by point count and check collinearity
+        point_counts = (valid_grids == 1).sum(dim=(1, 2))
+        can_add_mask = torch.zeros_like(point_counts, dtype=torch.bool)
+
+        unique_counts = torch.unique(point_counts)
+        for count in unique_counts:
+            # Find all grids in our valid set that have `count` points
+            count_mask = (point_counts == count)
+            current_indices = count_mask.nonzero(as_tuple=True)[0]
+            
+            # Case 1: Less than 2 points, no collinearity possible
+            if count < 2:
+                can_add_mask[current_indices] = True
+                continue
+
+            # Case 2: Check for collinearity
+            group_grids = valid_grids[current_indices]
+            group_candidates = valid_points[current_indices]
+
+            # Efficiently extract existing points for the entire group
+            nz = (group_grids == 1).nonzero(as_tuple=False)
+            existing_points = nz[:, 1:].reshape(group_grids.shape[0], count.item(), 2)
+            
+            # Vectorized collinearity check (adapted from check_new_points)
+            pair_indices = torch.combinations(torch.arange(count.item()), r=2)
+            p1s = existing_points[:, pair_indices[:, 0]]
+            p2s = existing_points[:, pair_indices[:, 1]]
+            p3s = group_candidates.unsqueeze(1) # a.k.a. the candidate points
+
+            x1, y1 = p1s[..., 0], p1s[..., 1]
+            x2, y2 = p2s[..., 0], p2s[..., 1]
+            x3, y3 = p3s[..., 0], p3s[..., 1]
+
+            collinearity_check = x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)
+            
+            # A candidate is invalid if ANY pair is collinear
+            invalid_candidates = (collinearity_check == 0).any(dim=1)
+            can_add_mask[current_indices] = ~invalid_candidates
+
+        # 3. Add all valid points to their grids in a single operation
+        if can_add_mask.any():
+            points_to_add = valid_points[can_add_mask]
+            indices_to_update = batch_indices[can_add_mask]
+            grids[indices_to_update, points_to_add[:, 0], points_to_add[:, 1]] = 1
+            
+        return grids
+
+    def available_spaces(self, grid):
+        """
+        Return the coordinates of all empty (value==0) squares in a single grid.
+        """
+        return (grid == 0).nonzero(as_tuple=False).to(torch.int)
 
     def best_grid(self, grids, points):
         """
+        Given `grids` (a stack of identical grids) and `points` (distinct 
+        candidate points), this function returns the grid that is "best" after
+        adding its point. The "best" grid is the one with the most available
+        (0) squares remaining after the point and all newly-forbidden squares
+        have been accounted for.
+        If multiple grids are tied for the best score, one is chosen randomly.
         """
-        
+        # 1. Get the resulting grids after attempting to add each point
+        updated_grids = self.add_points_to_grid(grids, points)
 
-     
+        # 2. For each of these new grids, update their forbidden squares
+        updated_grids = self.update_forbidden_squares(updated_grids)
+        
+        # 3. Score each grid by the number of available spaces left
+        scores = (updated_grids == 0).sum(dim=(1, 2))
+        
+        # 4. Find all indices of grids with the highest score
+        max_score = torch.max(scores)
+        best_indices = (scores == max_score).nonzero(as_tuple=True)[0]
+        
+        # 5. Randomly choose one from the best candidates
+        random_choice_idx = torch.randint(0, best_indices.shape[0], (1,)).item()
+        best_idx = best_indices[random_choice_idx]
+        
+        # 6. Return the chosen best grid
+        return updated_grids[best_idx]
 
     def try_to_add_points(self, points):
         """
@@ -370,10 +549,10 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 12
-    solver = NoThreeInLine(batch_size=1000000, grid_size=N, max_points=2*N)
+    N = 10
+    solver = NoThreeInLine(batch_size=150, grid_size=N, max_points=2*N)
     t0 = time.time()
-    solver.saturate()
+    solver.greedy_saturate()
     t1 = time.time()
     print(f"Saturation took {t1-t0:.2f} seconds.")
 
