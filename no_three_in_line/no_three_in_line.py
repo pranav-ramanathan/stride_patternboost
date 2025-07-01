@@ -40,7 +40,7 @@ class NoThreeInLine:
         # self.current_counts: Tracks the number of points in each construction.
         self.current_counts = torch.zeros(
             (self.batch_size,),
-            dtype=torch.int8,  # max_points can be < 2*N
+            dtype=torch.int8,  # max_points can be <= 2*N
             device=self.device,
         )
 
@@ -54,7 +54,7 @@ class NoThreeInLine:
         # cache for pair indices used in collinearity checks
         self._pair_cache = {}
 
-    def add_points(self, points, verbose=True):
+    def add_points(self, points):
         """
         Add points to constructions, updating internal state.
         
@@ -66,7 +66,6 @@ class NoThreeInLine:
         
         Args:
             points: tensor of shape (batch_size, 2) with (x, y) coordinates.
-            verbose: whether to print addition info (unused in this implementation).
         """
         points = points.to(dtype=torch.int8, device=self.device)
         points_int = points.to(dtype=torch.int)  # For indexing
@@ -126,7 +125,7 @@ class NoThreeInLine:
         # Update the total counts
         self.current_counts += added_point_counts
 
-    def check_new_points(self, new_points, verbose=False):
+    def check_new_points(self, new_points):
         """
         Check which points can be added without creating three-in-a-line.
         
@@ -304,6 +303,44 @@ class NoThreeInLine:
         for _ in range(self.max_points):
             pa = self.propose_additions_batched()
             self.add_points(pa)
+
+    @torch.no_grad()
+    def greedy_saturate(self):
+        """
+        Complete all constructions greedily until addition of any more points is impossible.
+        """
+        additions = self.possible_additions()
+        for i in range(self.batch_size):
+            current_additions = additions[i]
+            num_additions = (current_additions != self.null_tensor).any(dim=-1).sum().item()
+
+            if num_additions == 0: continue
+
+            current_grid = self.current_constructions[i].clone()
+            expanded_grids = current_grid.unsqueeze(0).repeat(num_additions, 1, 1)
+            
+            best_grid = self.best_grid(expanded_grids, current_additions)
+
+            self.current_constructions[i] = best_grid
+            self.current_counts[i] = (best_grid == 1).sum().item()
+            
+
+    def add_points_to_grid(self, grid, points):
+        """
+        """
+        pass
+
+    def available_spaces(self, grids):
+        """
+        """
+        pass
+
+    def best_grid(self, grids, points):
+        """
+        """
+        
+
+     
 
     def try_to_add_points(self, points):
         """

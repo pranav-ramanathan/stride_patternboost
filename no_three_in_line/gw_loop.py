@@ -17,8 +17,14 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-from makemoretokens import ModelConfig, CharDataset, Transformer, Bigram, MLP, RNN, BoW, InfiniteDataLoader, evaluate, generate, print_samples
-
+from makemoretokens import (
+    ModelConfig, 
+    CharDataset, 
+    Transformer, Bigram, MLP, RNN, BoW, 
+    InfiniteDataLoader, 
+    evaluate,
+    generate,
+)
 
 from no_three_in_line import NoThreeInLine
 
@@ -63,7 +69,6 @@ def get_parser():
     parser.add_argument("--local_rank", type=int, default=-1, help="Multi-GPU - Local rank")
     parser.add_argument("--master_port", type=int, default=-1, help="Master port (for multi-node SLURM jobs)")
 
-    parser.add_argument("--cpu", default=False, action=argparse.BooleanOptionalAction, help="run on cpu only")
     parser.add_argument("--device", type=str, default="auto", help="device to use for compute: auto|cpu|cuda|mps")
     
     # debug
@@ -108,7 +113,7 @@ def create_datasets(input_file, force_tokens=-1):
     return train_dataset, test_dataset
 
 def write_samples(model, train_dataset, num=10, new_file=False, use_logger=False):
-    """ samples from the model and writes them to file 
+    """samples from the model and writes them to file 
     
     Flow:
     1. Use trained neural network to generate token sequences
@@ -266,9 +271,8 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         counts_cpu = nothreeinline.current_counts.cpu().int()
         hist_pre += torch.bincount(counts_cpu, minlength=args.max_points + 1)
         
-        t_sat0 = time.time()
+
         nothreeinline.saturate()  # Complete constructions greedily
-        t_sat1 = time.time()
         # Record final point counts
         total_post_sat += torch.sum(nothreeinline.current_counts.float()).item()
         counts_cpu_post = nothreeinline.current_counts.cpu().int()
@@ -290,11 +294,10 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
                         # Sort encoding to create canonical form (same pattern = same sorted tokens)
                         sorted_encoding = tuple(sorted(encoding.tolist()))
                         
-                        # Only add if we haven't seen this pattern before
-                        if sorted_encoding not in unique_encodings:
-                            unique_encodings.add(sorted_encoding)
-                            encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
-                            out_string += encoding_string
+                        # Always add the symmetric construction; keep set for stats only
+                        unique_encodings.add(sorted_encoding)
+                        encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
+                        out_string += encoding_string
 
         else:
             for construction in top_constructions:
@@ -320,7 +323,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
 
     # Log deduplication statistics
     if args.symmetrize:
-        logger.info(f"Generated {len(unique_encodings)} unique constructions after symmetry deduplication")
+        logger.info(f"Generated {len(unique_encodings)} unique constructions")
 
     # Convert histograms to Counter for logging
     all_counts_pre_ctr = Counter({i:int(v) for i,v in enumerate(hist_pre.tolist()) if v != 0})
@@ -397,9 +400,7 @@ if __name__ == '__main__':
 
     # Set device with proper MPS support
     if args.device == "auto":
-        if args.cpu:
-            args.device = "cpu"
-        elif torch.backends.mps.is_available():
+        if torch.backends.mps.is_available():
             args.device = "mps"
         elif torch.cuda.is_available():
             args.device = "cuda"
@@ -555,6 +556,19 @@ if __name__ == '__main__':
     # MAIN TRAINING LOOP (matching your working version structure)
     # ========================================================================
     batch_loader = None  # Track the batch loader to ensure proper cleanup
+
+    def model_evaluation(step, best_loss):
+        train_loss = evaluate(model, train_dataset, args.device, batch_size=100, max_batches=10)
+        test_loss  = evaluate(model, test_dataset,  args.device, batch_size=100, max_batches=10)
+        logger.info(f"step {step} train loss: {train_loss} test loss: {test_loss}")
+        # save the model to disk if it has improved
+        if best_loss is None or test_loss < best_loss:
+            out_path = os.path.join(args.dump_path, "model.pt")
+            logger.info(f"test loss {test_loss} is the best so far, saving model to {out_path}")
+            torch.save(model.state_dict(), out_path)
+            best_loss = test_loss
+        return best_loss
+
     for generation in range(initial_gen, args.max_epochs):
         logger.info(f"============ Start of generation {generation} ============")
         if args.device == "cuda":
@@ -627,27 +641,11 @@ if __name__ == '__main__':
 
             # evaluate the model
             if step > 0 and step % 500 == 0:
-                train_loss = evaluate(model, train_dataset, args.device, batch_size=100, max_batches=10)
-                test_loss  = evaluate(model, test_dataset,  args.device, batch_size=100, max_batches=10)
-                logger.info(f"step {step} train loss: {train_loss} test loss: {test_loss}")
-                # save the model to disk if it has improved
-                if best_loss is None or test_loss < best_loss:
-                    out_path = os.path.join(args.dump_path, "model.pt")
-                    logger.info(f"test loss {test_loss} is the best so far, saving model to {out_path}")
-                    torch.save(model.state_dict(), out_path)
-                    best_loss = test_loss
+                best_loss = model_evaluation(step, best_loss)
                     
             step += 1
             if args.max_steps >= 0 and step >= args.max_steps:
-                train_loss = evaluate(model, train_dataset, args.device, batch_size=100, max_batches=10)
-                test_loss  = evaluate(model, test_dataset,  args.device, batch_size=100, max_batches=10)
-                logger.info(f"step {step} (final) train loss: {train_loss} test loss: {test_loss}")
-                # save the model to disk if it has improved
-                if best_loss is None or test_loss < best_loss:
-                    out_path = os.path.join(args.dump_path, "model.pt")
-                    logger.info(f"test loss {test_loss} is the best so far, saving model to {out_path}")
-                    torch.save(model.state_dict(), out_path)
-                    best_loss = test_loss
+                best_loss = model_evaluation(step, best_loss)
                 break
         
         logger.info(f"training took {time.time()-t_training:.2f} seconds")
