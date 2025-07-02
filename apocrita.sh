@@ -7,6 +7,7 @@
 #$ -N no_three_in_line_training
 #$ -o job_output.log
 
+module load python
 
 source .venv/bin/activate
 
