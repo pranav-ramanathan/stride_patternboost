@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import random
+import matplotlib.ticker as mticker
 
 from rich.logging import RichHandler
 from rich.progress import (
@@ -166,7 +167,7 @@ def generate_2d_symmetries(construction):
     Yields:
         unique transformed versions of the construction
     """
-    seen_constructions = set()
+    # seen_constructions = set()
     
     # Convert to tuple for hashing (tensors aren't hashable)
     def tensor_to_tuple(tensor):
@@ -186,10 +187,9 @@ def generate_2d_symmetries(construction):
     
     # Only yield unique transformations
     for transformed in transformations:
-        key = tensor_to_tuple(transformed)
-        if key not in seen_constructions:
-            seen_constructions.add(key)
-            yield transformed
+        
+        # seen_constructions.add(key)
+        yield transformed
 
 def decode_and_fix(args, token_decoding, token_encoding, generation):
     """
@@ -229,7 +229,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
 
     
     # Global deduplication across all batches
-    unique_encodings = set()
+    # unique_encodings = set()
     
     # Process in batches
     for b in range(0, len(sampled_tokens), args.batch_size):
@@ -263,6 +263,12 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
             nothreeinline.try_to_add_points(points)
             
         
+        # --- FIX STARTS HERE ---
+        # The neural network's suggestions might be invalid. We must recalculate
+        # the counts from the actual grids to get an accurate "before" picture.
+        nothreeinline.current_counts = (nothreeinline.current_constructions == 1).sum(dim=(1, 2)).to(torch.int8)
+        # --- FIX ENDS HERE ---
+
         # Record points added from neural network suggestions
         total_pre_sat += torch.sum(nothreeinline.current_counts.float()).item()
         # Update histogram efficiently
@@ -270,7 +276,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
         hist_pre += torch.bincount(counts_cpu, minlength=args.max_points + 1)
         
 
-        nothreeinline.greedy_saturate()  # Complete constructions greedily
+        nothreeinline.saturate()  # Complete constructions greedily
         # Record final point counts
         total_post_sat += torch.sum(nothreeinline.current_counts.float()).item()
         counts_cpu_post = nothreeinline.current_counts.cpu().int()
@@ -293,7 +299,7 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
                         sorted_encoding = tuple(sorted(encoding.tolist()))
                         
                         # Always add the symmetric construction; keep set for stats only
-                        unique_encodings.add(sorted_encoding)
+                        # unique_encodings.add(sorted_encoding)
                         encoding_string = ','.join([f'V{tok}' for tok in sorted_encoding]) + '\n'
                         out_string += encoding_string
 
@@ -319,36 +325,65 @@ def decode_and_fix(args, token_decoding, token_encoding, generation):
     logger.info(f"Total points in final constructions: {total_post_sat}")
     logger.info(f"Training data saved to {training_path}")
 
-    # Log deduplication statistics
-    if args.symmetrize:
-        logger.info(f"Generated {len(unique_encodings)} unique constructions")
+    # # Log deduplication statistics
+    # if args.symmetrize:
+    #     # logger.info(f"Generated {len(unique_encodings)} unique constructions")
 
     # Convert histograms to Counter for logging
     all_counts_pre_ctr = Counter({i:int(v) for i,v in enumerate(hist_pre.tolist()) if v != 0})
     all_counts_post_ctr = Counter({i:int(v) for i,v in enumerate(hist_post.tolist()) if v != 0})
     
     # --- New Plotting Logic ---
+    plt.style.use('seaborn-v0_8-whitegrid')
     scores = np.arange(max(len(hist_pre), len(hist_post)))
 
     # Pad the shorter histogram with zeros to ensure they are the same length
     pre_counts = np.pad(hist_pre.tolist(), (0, len(scores) - len(hist_pre)), 'constant')
     post_counts = np.pad(hist_post.tolist(), (0, len(scores) - len(hist_post)), 'constant')
 
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(14, 8))
+    ax = plt.gca()
+    
+    # Plot with lines and markers for a cleaner look
+    plt.plot(scores, pre_counts, color='#3498db', marker='o', linestyle='--', linewidth=1.5, markersize=5, label='Pre-Saturation')
+    plt.plot(scores, post_counts, color='#e74c3c', marker='o', linestyle='-', linewidth=2.5, markersize=7, label='Post-Saturation')
 
-    # Plot filled area charts for visual weight
-    plt.fill_between(scores, pre_counts, color="skyblue", alpha=0.4, label='Pre-Saturation')
-    plt.fill_between(scores, post_counts, color="red", alpha=0.4, label='Post-Saturation')
+    # Use a symmetric log scale for the y-axis
+    plt.yscale('symlog', linthresh=1)
+    ax.yaxis.set_major_formatter(mticker.ScalarFormatter())
+    
+    # Set x-axis to range from 0 to the perfect score (2*N)
+    perfect_score = 2 * args.grid_size
+    plt.xlim(-0.5, perfect_score + 0.5)
+    
+    # Ensure x-axis ticks are integers
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True, min_n_ticks=10))
+    plt.xticks(rotation=0)
 
-    # Plot lines on top to clearly see the peaks
-    plt.plot(scores, pre_counts, color="blue", alpha=0.8, linewidth=2, linestyle='--')
-    plt.plot(scores, post_counts, color="red", alpha=0.8, linewidth=2)
+    # Add a vertical line to mark the perfect score
+    plt.axvline(x=perfect_score, color='#2ecc71', linestyle=':', linewidth=2.5, label=f'Perfect Score ({perfect_score})')
+    
+    # Annotate if perfect constructions were found
+    if perfect_score < len(post_counts):
+        num_perfect = post_counts[perfect_score]
+        if num_perfect > 0:
+            ax.text(perfect_score, num_perfect, f' {int(num_perfect)} Found', 
+                    color='#27ae60', va='center', ha='left', fontsize=12, weight='bold')
 
-    plt.title(f'Score Distribution Comparison (Gen {generation})', fontsize=16)
-    plt.xlabel('Score', fontsize=12)
-    plt.ylabel('Count', fontsize=12)
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.legend()
+    # Improve title and labels
+    plt.title(f'Score Distribution Comparison (Generation {generation})', fontsize=18, pad=20)
+    plt.xlabel('Score (Number of Points)', fontsize=14, labelpad=15)
+    plt.ylabel('Number of Constructions (Log Scale)', fontsize=14, labelpad=15)
+    
+    # Remove top and right spines for a cleaner look
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # Customize legend
+    legend = plt.legend(frameon=True, loc='upper left')
+    legend.get_frame().set_facecolor('white')
+    legend.get_frame().set_edgecolor('gray')
+
     plt.tight_layout()
 
     # Save the figure
@@ -463,7 +498,7 @@ if __name__ == '__main__':
                 max_points=args.max_points,
                 device=args.device
             )
-            nothreeinline.saturate()
+            nothreeinline.greedy_saturate_batched()
 
             # sort according to number of points
             x = torch.argsort(nothreeinline.current_counts, descending=True)

@@ -315,17 +315,17 @@ class NoThreeInLine:
             while True:
                 # Find all empty spaces on the current grid
                 possible_points = self.available_spaces(current_grid)
-
+                
                 if possible_points.shape[0] == 0:
                     break  # No more empty spaces
-
+                
                 # Set up the inputs for best_grid: one grid for each possible point
                 num_candidates = possible_points.shape[0]
                 expanded_grids = current_grid.unsqueeze(0).repeat(num_candidates, 1, 1)
 
                 # Find the best grid after trying all possible single-point additions
                 best_next_grid = self.best_grid(expanded_grids, possible_points)
-
+            
                 # Check if we made progress
                 if (best_next_grid == 1).sum() > (current_grid == 1).sum():
                     current_grid = best_next_grid
@@ -339,7 +339,89 @@ class NoThreeInLine:
             # Update the final construction and its point count
             self.current_constructions[i] = current_grid
             self.current_counts[i] = (current_grid == 1).sum().item()
+
+    @torch.no_grad()
+    def greedy_saturate_batched(self):
+        """
+        Complete all constructions greedily using vectorized operations.
+        Exactly mirrors greedy_saturate() but processes all grids simultaneously.
+        """
+        # Track which grids are still active (have possible moves)
+        active_mask = torch.ones(self.batch_size, dtype=torch.bool, device=self.device)
+        
+        while active_mask.any():
+            # Find active grids and collect all their candidates
+            all_expanded_grids = []
+            all_possible_points = []
+            grid_info = []  # (grid_idx, start_pos, num_candidates)
             
+            current_pos = 0
+            for grid_idx in range(self.batch_size):
+                if not active_mask[grid_idx]:
+                    continue
+                    
+                current_grid = self.current_constructions[grid_idx]
+                
+                # Find all empty spaces on the current grid
+                possible_points = self.available_spaces(current_grid)
+                
+                if possible_points.shape[0] == 0:
+                    # No more empty spaces for this grid
+                    active_mask[grid_idx] = False
+                    continue
+                
+                # Set up the inputs for best_grid: one grid for each possible point
+                num_candidates = possible_points.shape[0]
+                expanded_grids = current_grid.unsqueeze(0).repeat(num_candidates, 1, 1)
+                
+                # Store for batch processing
+                all_expanded_grids.append(expanded_grids)
+                all_possible_points.append(possible_points)
+                grid_info.append((grid_idx, current_pos, num_candidates))
+                current_pos += num_candidates
+            
+            if not all_expanded_grids:
+                # No active grids left
+                break
+            
+            # Concatenate all grids and points for batch processing
+            batch_expanded_grids = torch.cat(all_expanded_grids, dim=0)
+            batch_possible_points = torch.cat(all_possible_points, dim=0)
+            
+            # Process all candidates at once using existing logic
+            batch_updated_grids = self.add_points_to_grid(batch_expanded_grids, batch_possible_points)
+            batch_updated_grids = self.update_forbidden_squares(batch_updated_grids)
+            
+            # Score all updated grids
+            batch_scores = (batch_updated_grids == 0).sum(dim=(1, 2))
+            
+            # For each grid, find its best candidate
+            for grid_idx, start_pos, num_candidates in grid_info:
+                # Extract this grid's candidates and scores
+                end_pos = start_pos + num_candidates
+                grid_scores = batch_scores[start_pos:end_pos]
+                grid_updated_grids = batch_updated_grids[start_pos:end_pos]
+                
+                # Find the best grid (same logic as original best_grid method)
+                max_score = torch.max(grid_scores)
+                best_mask = (grid_scores == max_score)
+                
+                # Randomly choose among ties
+                best_indices = best_mask.nonzero(as_tuple=True)[0]
+                chosen_idx = best_indices[torch.randint(0, best_indices.shape[0], (1,)).item()]
+                
+                best_next_grid = grid_updated_grids[chosen_idx]
+                original_grid = self.current_constructions[grid_idx]
+                
+                # Check if we made progress (same logic as original)
+                if (best_next_grid == 1).sum() > (original_grid == 1).sum():
+                    self.current_constructions[grid_idx] = best_next_grid
+                else:
+                    # No valid point could be added to improve the score, so this grid is done
+                    active_mask[grid_idx] = False
+        
+        # Update final counts
+        self.current_counts = (self.current_constructions == 1).sum(dim=(1, 2)).to(torch.int8)
 
     def update_forbidden_squares(self, grids):
         """
@@ -549,36 +631,51 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 10
-    solver = NoThreeInLine(batch_size=150, grid_size=N, max_points=2*N)
+    N = 20
+    batch_size = 10
+
+    solver_batched = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
     t0 = time.time()
-    solver.greedy_saturate()
+    solver_batched.greedy_saturate_batched()
     t1 = time.time()
+
     print(f"Saturation took {t1-t0:.2f} seconds.")
 
     t2 = time.time()
     print("Test completed!")
     print(f"Total time: {t2-t0:.2f} seconds.")
+
+    # Count constructions for batched version
+
+    points_counter_batched = Counter(solver_batched.current_counts.tolist())
+    print(points_counter_batched)
+
     
-    # print("Final point counts per batch:", solver.current_counts.tolist())
-    print("Max points found in a construction:", torch.max(solver.current_counts).item())
-    print("Total constructions:", solver.batch_size)
+    
+    
 
-    points_counter = Counter(solver.current_counts.tolist())
-    print(points_counter)
+    # Find the best grid (highest number of points)
+    best_idx_batched = torch.argmax(solver_batched.current_counts).item()
+    best_grid_batched = solver_batched.current_constructions[best_idx_batched]
+    best_count_batched = solver_batched.current_counts[best_idx_batched].item()
+    
+    print(f"\nBest construction has {best_count_batched} points:")
+    print_grid(best_grid_batched, f"Best Grid ({best_count_batched} points)")
 
+    solver_sequential = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
+    t3 = time.time()
+    solver_sequential.greedy_saturate()
+    t4 = time.time()
+    print(f"Saturation took {t4-t3:.2f} seconds.")
 
+    points_counter_sequential = Counter(solver_sequential.current_counts.tolist())
+    print(points_counter_sequential)
 
-    # Print all constructions in the batch
-    if solver.batch_size > 0:
-        # Find top 5 constructions by point count
-        top_indices = torch.topk(solver.current_counts, min(1, solver.batch_size)).indices
-        
-        print("\n--- Top Final Constructions ---")
-        for i, idx in enumerate(top_indices):
-            construction = solver.current_constructions[idx]
-            num_points = solver.current_counts[idx].item()
-            print_grid(
-                construction,
-                title=f"\nTop Construction #{i+1} (found {num_points} points on a {solver.N}x{solver.N} grid)"
-            )
+    best_idx_sequential = torch.argmax(solver_sequential.current_counts).item()
+    best_grid_sequential = solver_sequential.current_constructions[best_idx_sequential]
+    best_count_sequential = solver_sequential.current_counts[best_idx_sequential].item()
+
+    print(f"\nBest construction has {best_count_sequential} points:")
+    print_grid(best_grid_sequential, f"Best Grid ({best_count_sequential} points)")
+
+    print(f"Speedup: {t4-t3:.2f} / {t1-t0:.2f} = {((t4-t3)/(t1-t0)):.2f}x")
