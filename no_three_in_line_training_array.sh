@@ -1,0 +1,36 @@
+#!/bin/bash
+#$ -cwd
+#$ -j y
+#$ -pe smp 30
+#$ -l h_rt=1:0:0
+#$ -l h_vmem=2G
+#$ -N no_three_in_line_training_array
+#$ -t 1-10
+#$ -tc 1
+#$ -o logs/train_array_$TASK_ID.log
+
+module load python
+
+cd stride_patternboost
+source .venv/bin/activate
+
+export OMP_NUM_THREADS=$NSLOTS
+
+echo "Job started at: $(date)"
+echo "Task ID: $SGE_TASK_ID"
+echo "Working directory: $(pwd)"
+
+echo "Starting no-three-in-line training..."
+uv run no_three_in_line/gw_train.py \
+    --device cpu \
+    --grid_size 20 \
+    --max_points 40 \
+    --target_training_size 2000 \
+    --max-steps 2000 \
+    --learning-rate 0.00001 \
+    --keep_best_fraction 0.1 \
+    --max_epochs 6 \
+    --num-workers 30 \
+    --dump_path "./N20"
+
+echo "Job completed at: $(date)" 
