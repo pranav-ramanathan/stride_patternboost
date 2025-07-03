@@ -11,6 +11,8 @@
 
 cd stride_patternboost
 
+module load python
+
 # Activate virtual environment
 source .venv/bin/activate
 

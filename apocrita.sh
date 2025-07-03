@@ -26,7 +26,7 @@ export OMP_NUM_THREADS=$NSLOTS
 
 # Run the training job
 echo "Starting no-three-in-line training..."
-uv run no_three_in_line/gw_loop.py \
+uv run no_three_in_line/gw_train.py \
     --device cpu \
     --grid_size 20 \
     --max_points 40 \
