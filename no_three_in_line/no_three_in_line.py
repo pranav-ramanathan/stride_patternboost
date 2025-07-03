@@ -644,7 +644,7 @@ if __name__ == "__main__":
     t2 = time.time()
     print("Test completed!")
     print(f"Total time: {t2-t0:.2f} seconds.")
-
+    
     # Count constructions for batched version
 
     points_counter_batched = Counter(solver_batched.current_counts.tolist())
