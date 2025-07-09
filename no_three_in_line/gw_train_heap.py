@@ -79,9 +79,9 @@ class TopPool:
                 self.add(score, line)
 
     def dump_to_file(self, path: str):
-        # sort by score desc for nicer readability
+        # Sorting removed for performance as it is not functionally required.
         with open(path, "w") as f:
-            for _score, token_str in sorted(self.heap, key=lambda x: -x[0]):
+            for _score, token_str in self.heap:
                 f.write(token_str + "\n")
 
     def __len__(self):
@@ -244,20 +244,24 @@ def create_datasets_from_file(input_file: str, args: argparse.Namespace,
     return train_ds, test_ds
 
 
-def write_samples(model, train_dataset, args, num=10, new_file=False):
-    out_file = os.path.join(args.dump_path, "out.txt")
+def generate_samples(model, train_dataset, args, num_samples):
+    """Generates samples from the model and returns them as a list of token lists."""
     top_k = args.top_k if args.top_k != -1 else None
 
-    X_init = torch.zeros(num, 1, dtype=torch.long).to(args.device)
+    X_init = torch.zeros(num_samples, 1, dtype=torch.long).to(args.device)
     steps = train_dataset.get_output_length() - 1
     X_samp = generate(model, X_init, steps, temperature=args.temperature, top_k=top_k, do_sample=True).cpu()
 
-    with open(out_file, "a" if not new_file else "w") as f:
-        for i in range(X_samp.size(0)):
-            row = X_samp[i, 1:].tolist()
-            crop = row.index(0) if 0 in row else len(row)
-            tokens = train_dataset.decode(row[:crop])
-            f.write(tokens + "\n")
+    all_tokens = []
+    for i in range(X_samp.size(0)):
+        row = X_samp[i, 1:].tolist()
+        crop = row.index(0) if 0 in row else len(row)
+        # Decode to token strings like "V12", then strip "V" and convert to int
+        decoded_str = train_dataset.decode(row[:crop])
+        tokens = [int(t[1:]) for t in decoded_str.split(',') if t]
+        if tokens:
+            all_tokens.append(tokens)
+    return all_tokens
 
 
 def format_grid(construction_tensor: torch.Tensor) -> str:
@@ -271,13 +275,10 @@ def format_grid(construction_tensor: torch.Tensor) -> str:
 
 # --------------------------- Core: decode & update pool ----------------------
 
-def decode_and_update_pool(args, token_decoding, token_encoding, generation, logger, pool: TopPool):
+def decode_and_update_pool(args, token_decoding, token_encoding, generation, logger, pool: TopPool, sampled_tokens: list):
     N = args.grid_size
 
-    with open(os.path.join(args.dump_path, "out.txt"), "r") as f:
-        sampled_tokens = [[int(t[1:]) for t in ln.strip().split(",")] for ln in f if ln.strip()]
-
-    logger.info(f"{len(sampled_tokens)} samples decoded.")
+    logger.info(f"{len(sampled_tokens)} samples received to process.")
 
     hist_pre = torch.zeros(args.max_points + 1, dtype=torch.int64)
     hist_post = torch.zeros(args.max_points + 1, dtype=torch.int64)
@@ -398,8 +399,6 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
     plt.close()
     logger.info(f"Histogram saved to {hist_path}")
 
-    os.remove(os.path.join(args.dump_path, "out.txt"))
-
 
 # --------------------------- Main -------------------------------------------
 
@@ -497,20 +496,22 @@ if __name__ == "__main__":
 
         # sample -------------------------------------------------------------
         total_to_generate = int(args.target_training_size * (1 / args.keep_best_fraction))
-        write_samples(model, train_ds, args, num=0, new_file=True)
+        
+        all_samples = []
         with Progress(TextColumn("[progress.description]{task.description}"), BarColumn(), MofNCompleteColumn(), TimeRemainingColumn()) as prog:
             t = prog.add_task("Generating samples", total=total_to_generate)
             done = 0
             while done < total_to_generate:
                 n = min(args.gen_batch_size, total_to_generate - done)
-                write_samples(model, train_ds, args, num=n)
+                new_samples = generate_samples(model, train_ds, args, num_samples=n)
+                all_samples.extend(new_samples)
                 done += n
                 prog.update(t, advance=n)
 
         # decode / update pool ----------------------------------------------
         if args.device in {"mps", "cuda"}:
             torch.cuda.empty_cache()
-        decode_and_update_pool(args, token_decoding, token_encoding, gen + 1, logger, pool)
+        decode_and_update_pool(args, token_decoding, token_encoding, gen + 1, logger, pool, all_samples)
 
         logger.info(f"=========== End of generation {gen + 1} ===========")
 
