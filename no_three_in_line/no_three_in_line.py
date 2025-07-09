@@ -631,8 +631,8 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 20
-    batch_size = 10
+    N = 10
+    batch_size = 1000
 
     solver_batched = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
     t0 = time.time()
