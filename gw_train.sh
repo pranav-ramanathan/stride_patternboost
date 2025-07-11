@@ -6,6 +6,8 @@
 #$ -l h_vmem=2G
 #$ -N no_three_in_line_training
 #$ -o logs/N20/
+#$ -m abe
+#$ -M ah23335@qmul.ac.uk
 
 module load python
 
