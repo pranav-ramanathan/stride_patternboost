@@ -4,13 +4,10 @@
 #$ -pe smp 30
 #$ -l h_rt=1:0:0
 #$ -l h_vmem=2G
-#$ -N generate_initial_array_$SGE_TASK_ID.log
+#$ -N generate_initial_array
 #$ -t 1-10
 #$ -tc 10
 #$ -o logs/N20/
-
-# Parse command line arguments
-
 
 cd stride_patternboost
 
@@ -37,13 +34,7 @@ export OMP_NUM_THREADS=$NSLOTS
 # Run the initial generation with job-specific parameters
 echo "Starting initial generation for task $SGE_TASK_ID..."
 
-uv run no_three_in_line/generate_initial_heap.py \ 
-    --device cpu \      
-    --grid_size 20 \         
-    --max_points 40 \               
-    --target_training_size 500 \
-    --keep_best_fraction 0.1 \
-    --dump_path "N20" \
-    --job_id $SGE_TASK_ID
+# Build command as single line to avoid line continuation issues
+uv run no_three_in_line/generate_initial_heap.py --device cpu --grid_size 20 --max_points 40 --target_training_size 500 --keep_best_fraction 0.1 --dump_path "N20" --job_id $SGE_TASK_ID
 
 echo "Task $SGE_TASK_ID completed at: $(date)"
