@@ -364,33 +364,26 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
 
     # histogram --------------------------------------------------------------
     scores = np.arange(len(hist_pre))
-    pre_counts, post_counts = hist_pre.numpy(), hist_post.numpy()
+    pre_counts = hist_pre.numpy()
 
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.figure(figsize=(14, 8))
     ax = plt.gca()
-    ax.plot(scores, pre_counts, "--o", label="Pre-Saturation", color="#3498db")
-    ax.plot(scores, post_counts, "-o", label="Post-Saturation", color="#e74c3c")
+    ax.plot(scores, pre_counts, "-o", label="Transformer Generated", color="#3498db", linewidth=2.5, markersize=7)
     plt.yscale("symlog", linthresh=1)
     perfect = 2 * N
-    ax.axvline(perfect, ls=":", color="#2ecc71", label=f"Perfect ({perfect})")
+    ax.axvline(perfect, ls=":", color="#2ecc71", label=f"Perfect ({perfect})", linewidth=2.5)
     
     # Add text annotations for number of perfect grids
     if perfect < len(pre_counts):
         num_perfect_pre = int(pre_counts[perfect])
         if num_perfect_pre > 0:
-            ax.text(perfect + 0.1, num_perfect_pre, f'Pre: {num_perfect_pre}',
+            ax.text(perfect + 0.1, num_perfect_pre, f'{num_perfect_pre}',
                     color='#3498db', va='center', ha='left', fontsize=10, weight='bold')
-
-    if perfect < len(post_counts):
-        num_perfect_post = int(post_counts[perfect])
-        if num_perfect_post > 0:
-            ax.text(perfect + 0.1, num_perfect_post, f'Post: {num_perfect_post}',
-                    color='#e74c3c', va='center', ha='left', fontsize=10, weight='bold')
 
     ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     plt.legend()
-    plt.title(f"Score Distribution (Generation {generation})")
+    plt.title(f"Transformer Generated Score Distribution (Generation {generation})")
     plt.xlabel("Score (# points)")
     plt.ylabel("Count (log scale)")
     plt.tight_layout()
