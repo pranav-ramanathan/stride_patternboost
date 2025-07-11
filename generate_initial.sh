@@ -27,8 +27,9 @@ echo "Task ID: $SGE_TASK_ID"
 echo "Working directory: $(pwd)"
 echo "Python version: $(python --version)"
 echo "Grid size: 20"
-echo "Pool capacity: 500"
-echo "Number of jobs: 10"
+echo "Max points: 40"
+echo "Target training size: 500"
+echo "Job ID: $SGE_TASK_ID"
 
 # Set OMP threads for CPU-only execution
 export OMP_NUM_THREADS=$NSLOTS
@@ -37,8 +38,9 @@ export OMP_NUM_THREADS=$NSLOTS
 echo "Starting initial generation for task $SGE_TASK_ID..."
 uv run no_three_in_line/generate_initial_heap.py \          
     --grid_size 20 \
-    --pool_capacity 500 \
-    --dump_path "training/N20" \
-    --num_jobs 10     
+    --max_points 40 \
+    --target_training_size 500 \
+    --dump_path "N20" \
+    --job_id $SGE_TASK_ID     
 
 echo "Task $SGE_TASK_ID completed at: $(date)"
