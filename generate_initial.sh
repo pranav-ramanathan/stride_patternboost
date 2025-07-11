@@ -4,10 +4,10 @@
 #$ -pe smp 30
 #$ -l h_rt=1:0:0
 #$ -l h_vmem=2G
-#$ -N generate_initial_array
+#$ -N generate_initial_array_$SGE_TASK_ID.log
 #$ -t 1-10
 #$ -tc 10
-#$ -o logs/N20/generate_initial_$SGE_TASK_ID.log
+#$ -o logs/N20/
 
 # Parse command line arguments
 
