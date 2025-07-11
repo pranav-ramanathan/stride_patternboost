@@ -13,7 +13,7 @@ cd stride_patternboost
 
 source .venv/bin/activate
 
-uv run no_three_in_line/aggregate_initial.py \
+uv run no_three_in_line/aggregate_initial_runs.py \
     --grid_size 20 \
     --dump_path "training/N20" \
     --num_jobs 10
