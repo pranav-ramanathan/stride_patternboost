@@ -125,6 +125,9 @@ class NoThreeInLine:
         # Update the total counts
         self.current_counts += added_point_counts
 
+        # After adding points, proactively update all newly forbidden squares.
+        self.current_constructions = self.update_forbidden_squares(self.current_constructions)
+
     def check_new_points(self, new_points):
         """
         Check which points can be added without creating three-in-a-line.
@@ -605,12 +608,26 @@ class NoThreeInLine:
 
     def try_to_add_points(self, points):
         """
-        points is a tensor of shape (batch_size, 2)
-        we add each point if it satisfies constraints
+        Tries to add a batch of points to their respective constructions.
+        It adds the valid points and ignores the invalid ones. After a point is
+        added, the grid is immediately updated with all newly forbidden squares.
+
+        Args:
+            points (torch.Tensor): A tensor of shape `(batch_size, 2)` with points to add.
+
+        Returns:
+            torch.Tensor: A boolean tensor of shape `(batch_size,)` where `True`
+                          indicates the point was successfully added and `False`
+                          indicates it was an invalid move.
         """
         can_add = self.check_new_points(points.unsqueeze(1)).squeeze(1)
-        points[~can_add] = self.null_tensor
-        self.add_points(points)
+        
+        # We clone the points tensor before modification to avoid side effects for the caller.
+        points_to_add = points.clone()
+        points_to_add[~can_add] = self.null_tensor
+        self.add_points(points_to_add)
+        
+        return can_add
     
 
 def print_grid(construction_grid, title="Construction"):

@@ -442,6 +442,8 @@ def generate(model, idx, max_new_tokens, temperature=1.0, do_sample=False, top_k
         logits = logits[:, -1, :] / temperature
         # optionally crop the logits to only the top k options
         if top_k is not None:
+            # Ensure top_k is not greater than the vocabulary size
+            top_k = min(top_k, logits.size(-1))
             v, _ = torch.topk(logits, top_k)
             logits[logits < v[:, [-1]]] = -float('Inf')
         # apply softmax to convert logits to (normalized) probabilities

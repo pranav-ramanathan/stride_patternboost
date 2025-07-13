@@ -122,6 +122,15 @@ def get_parser():
     parser.add_argument("--max_steps", type=int, default=5000)
     parser.add_argument("--max_epochs", type=int, default=20)
 
+    # RL loss options --------------------------------------------------------
+    parser.add_argument("--w-imitate", type=float, default=0.5, help="Weight for imitation (cross-entropy) loss.")
+    parser.add_argument("--w-goal", type=float, default=0.5, help="Weight for goal (RL policy) loss.")
+    parser.add_argument("--w-len", type=float, default=1.0, help="Reward weight for number of valid points.")
+    parser.add_argument("--w-invalid", type=float, default=1.5, help="Penalty weight for invalid moves.")
+    parser.add_argument("--w-over", type=float, default=2.0, help="Penalty weight for exceeding 2n points.")
+    parser.add_argument("--w-empty", type=float, default=10.0, help="Penalty for generating an empty grid.")
+    parser.add_argument("--w-perfect", type=float, default=5.0, help="Bonus reward for achieving a perfect 2n grid.")
+
     # sampling ---------------------------------------------------------------
     parser.add_argument("--gen_batch_size", type=int, default=10)
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -436,7 +445,7 @@ if __name__ == "__main__":
     pool.build_from_file(init_file)
     logger.info(f"Initial pool size: {len(pool)}")
 
-    best_loss = None
+    best_loss = 1e9 # Initialize with a very high value
     end_gen = initial_gen + args.max_epochs
     for gen in range(initial_gen, end_gen):
         logger.info(f"=========== Start of generation {gen + 1} ===========")
@@ -458,33 +467,95 @@ if __name__ == "__main__":
         if os.path.isfile(model_path):
             model.load_state_dict(torch.load(model_path))
             logger.info("Resumed existing model.")
-
-            # If resuming, evaluate the model to set the initial best_loss
-            if best_loss is None:
-                logger.info("Evaluating resumed model to set initial best_loss...")
-                te_loss = evaluate(model, test_ds, args.device, max_batches=20)
-                logger.info(f"Initial best_loss set to {te_loss:.4f}")
-                best_loss = te_loss
         
         optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
         loader = InfiniteDataLoader(train_ds, batch_size=args.nn_batch_size, pin_memory=True, num_workers=args.num_workers)
 
         for step in range(args.max_steps + 1):
+            # --- HYBRID RL + SUPERVISED TRAINING STEP ---
+            model.train() # Ensure model is in training mode for gradients
+
+            # --- Part 1: Supervised Learning (Imitation Loss) ---
             X, Y = [t.to(args.device) for t in next(loader)]
-            logits, loss = model(X, Y)
+            _, imitation_loss = model(X, Y)
+
+            # --- Part 2: Reinforcement Learning (Goal Loss) ---
+            # Generate sequences (the "rollout")
+            nti = NoThreeInLine(args.nn_batch_size, args.grid_size, args.max_points, device=args.device)
+            
+            # Initialize sequences with a <START> token (index 0)
+            sequences = torch.zeros(args.nn_batch_size, 1, dtype=torch.long, device=args.device)
+            
+            log_probs = torch.zeros(args.nn_batch_size, device=args.device)
+            total_invalid_moves = torch.zeros(args.nn_batch_size, device=args.device)
+            
+            # We need to detach the hidden state to prevent gradients from flowing endlessly
+            # This part is complex; for now, we generate with no_grad and calculate loss on the result.
+            # A more advanced implementation would use a proper policy gradient method.
+            with torch.no_grad():
+                for _ in range(args.max_points):
+                    logits, _ = model(sequences)
+                    probs = F.softmax(logits[:, -1, :], dim=-1)
+                    next_tokens = torch.multinomial(probs, num_samples=1)
+                    
+                    # Decode tokens to points
+                    points = -1 * torch.ones((args.nn_batch_size, 2), dtype=torch.int8, device=args.device)
+                    for i in range(args.nn_batch_size):
+                        token_val = next_tokens[i].item()
+                        if token_val > 0 and token_val < len(token_decoding): # token 0 is special
+                            points[i] = token_decoding[token_val]
+
+                    was_added = nti.try_to_add_points(points)
+                    total_invalid_moves += (~was_added).float()
+                    sequences = torch.cat([sequences, next_tokens], dim=1)
+
+            # Now, re-calculate the log probabilities of the generated sequences with gradients
+            full_logits, _ = model(sequences[:, :-1]) # feed all but the last token
+            full_log_probs = F.log_softmax(full_logits, dim=-1)
+            
+            # Gather the log_probs for the specific tokens we generated
+            action_log_probs = full_log_probs.gather(2, sequences[:, 1:].unsqueeze(-1)).squeeze(-1)
+            final_log_probs = action_log_probs.sum(dim=1)
+
+            # Calculate rewards
+            T = nti.current_counts.float()
+            I = total_invalid_moves
+            length_reward = args.w_len * T
+            invalid_penalty = args.w_invalid * I
+            overage_penalty = args.w_over * torch.clamp(T - 2 * args.grid_size, min=0)
+            rewards = length_reward - invalid_penalty - overage_penalty
+            
+            # Add a large penalty for empty grids
+            empty_mask = (T == 0)
+            rewards[empty_mask] -= args.w_empty
+
+            # Add a bonus for perfect 2n grids
+            perfect_mask = (T == 2 * args.grid_size)
+            rewards[perfect_mask] += args.w_perfect
+            
+            advantage = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+            
+            policy_loss = -(advantage.detach() * final_log_probs).mean()
+            
+            # --- Part 3: Combine losses and ensure positivity ---
+            # We use SoftPlus to ensure the final loss is always positive.
+            # This makes the loss value easier to interpret and more stable.
+            combined_loss = (args.w_imitate * imitation_loss) + (args.w_goal * policy_loss)
+            loss = F.softplus(combined_loss)
+
             model.zero_grad(set_to_none=True)
             loss.backward()
             optim.step()
             if step % 100 == 0:
                 logger.info(f"step {step} | loss {loss.item():.4f}")
             if step and step % 500 == 0:
-                tr_loss = evaluate(model, train_ds, args.device, max_batches=10)
-                te_loss = evaluate(model, test_ds, args.device, max_batches=10)
-                logger.info(f"step {step} train {tr_loss:.4f} test {te_loss:.4f}")
-                if best_loss is None or te_loss < best_loss:
-                    logger.info(f"test loss {te_loss} is best so far, saving model")
+                # We now evaluate using the loss itself, as it's the most direct metric.
+                current_loss = loss.item()
+                logger.info(f"step {step} | loss: {current_loss:.4f}")
+                if current_loss < best_loss:
+                    logger.info(f"New best loss {current_loss:.4f} < {best_loss:.4f}, saving model")
                     torch.save(model.state_dict(), model_path)
-                    best_loss = te_loss
+                    best_loss = current_loss
         loader.shutdown()
 
         # sample -------------------------------------------------------------
