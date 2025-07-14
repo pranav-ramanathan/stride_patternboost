@@ -278,6 +278,11 @@ def format_grid(construction_tensor: torch.Tensor) -> str:
 def decode_and_update_pool(args, token_decoding, token_encoding, generation, logger, pool: TopPool, sampled_tokens: list):
     N = args.grid_size
 
+    # Force a sync before we start processing, to make sure any previous GPU work is complete
+    if args.device == "mps":
+        torch.mps.synchronize()
+
+    decode_start_time = time.time()
     logger.info(f"{len(sampled_tokens)} samples received to process.")
 
     hist_pre = torch.zeros(args.max_points + 1, dtype=torch.int64)
@@ -289,12 +294,14 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
 
     for b in range(0, len(sampled_tokens), args.batch_size):
         cur_bs = min(args.batch_size, len(sampled_tokens) - b)
-        nti = NoThreeInLine(cur_bs, N, args.max_points, device=args.device)
+        # Force NoThreeInLine to run on CPU
+        nti_device = "cpu"
+        nti = NoThreeInLine(cur_bs, N, args.max_points, device=nti_device)
         batch = sampled_tokens[b : b + cur_bs]
 
         max_len = max(len(seq) for seq in batch) if batch else 0
         for i in range(max_len):
-            pts = -1 * torch.ones((cur_bs, 2), dtype=torch.int8, device=args.device)
+            pts = -1 * torch.ones((cur_bs, 2), dtype=torch.int8, device=nti_device)
             for j in range(cur_bs):
                 if i < len(batch[j]):
                     tok_num = batch[j][i]
@@ -312,7 +319,7 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
             current_max_score, current_max_idx = torch.max(nti.current_counts, dim=0)
             if current_max_score > best_pre_sat_score:
                 best_pre_sat_score = current_max_score
-                best_pre_sat_construction = nti.current_constructions[current_max_idx]
+                best_pre_sat_construction = nti.current_constructions[current_max_idx].cpu()
 
         total_pre += torch.sum(nti.current_counts).item()
         hist_pre.add_(torch.bincount(nti.current_counts.cpu(), minlength=args.max_points + 1))
@@ -334,7 +341,7 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
             if score > args.max_points:
                 continue
 
-            construction = constructions_sorted[idx].cpu()
+            construction = constructions_sorted[idx] # Already on CPU
 
             if args.symmetrize:
                 canonical_form = get_canonical_form(construction, token_encoding)
@@ -344,6 +351,8 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
                 token_str = construction_to_string(construction, token_encoding)
                 if token_str:
                     pool.add(score, token_str, logger)
+
+    logger.info(f"Main processing loop took {time.time() - decode_start_time:.2f} seconds.")
 
     if best_pre_sat_construction is not None:
         grid_viz = format_grid(best_pre_sat_construction.cpu())
@@ -357,12 +366,15 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
     logger.info(f"Pool size: {len(pool)}  |  Worst score in pool: {pool.heap[0][0] if pool.heap else 'N/A'}")
     logger.info(f"NN points: {total_pre}, Saturation added: {total_post - total_pre}")
 
+    post_processing_start_time = time.time()
     all_counts_pre_ctr = Counter({i: int(v) for i, v in enumerate(hist_pre.tolist()) if v != 0})
     all_counts_post_ctr = Counter({i: int(v) for i, v in enumerate(hist_post.tolist()) if v != 0})
     logger.info(f"Score distribution before saturation: {all_counts_pre_ctr}")
     logger.info(f"Score distribution after  saturation: {all_counts_post_ctr}")
+    logger.info(f"Counter creation took {time.time() - post_processing_start_time:.2f} seconds.")
 
     # histogram --------------------------------------------------------------
+    hist_start_time = time.time()
     scores = np.arange(len(hist_pre))
     pre_counts = hist_pre.numpy()
 
@@ -391,6 +403,7 @@ def decode_and_update_pool(args, token_decoding, token_encoding, generation, log
     plt.savefig(hist_path, dpi=300)
     plt.close()
     logger.info(f"Histogram saved to {hist_path}")
+    logger.info(f"Histogram generation took {time.time() - hist_start_time:.2f} seconds.")
 
 
 # --------------------------- Main -------------------------------------------

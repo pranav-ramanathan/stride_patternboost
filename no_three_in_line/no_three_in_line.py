@@ -54,6 +54,77 @@ class NoThreeInLine:
         # cache for pair indices used in collinearity checks
         self._pair_cache = {}
 
+    def _update_forbidden_squares_after_add(self, batch_indices, new_points, current_counts):
+        """
+        After adding new points, update the constructions to mark newly forbidden squares.
+        
+        This is called from `add_points` after points have been placed on the grid.
+        This is an optimized check that only considers lines formed with the new points.
+        
+        Args:
+            batch_indices: 1D tensor of indices for the batches that were modified.
+            new_points: 2D tensor (len(batch_indices), 2) of the points that were just added.
+            current_counts: 1D tensor of point counts for the modified batches *before* the new point was added.
+        """
+        if batch_indices.numel() == 0:
+            return
+
+        # We only need to check for new lines with existing points.
+        # This requires at least one existing point, so the new count would be >= 2.
+        # This means the old count was >= 1.
+        valid_mask = current_counts >= 1
+        if not valid_mask.any():
+            return
+            
+        # Filter to only the batches that have other points to form a line with
+        batch_indices = batch_indices[valid_mask]
+        new_points = new_points[valid_mask]
+        current_counts = current_counts[valid_mask]
+
+        if batch_indices.numel() == 0:
+            return
+
+        # For each modified batch, check the new point against all existing points
+        existing_points_full = self.points_list[batch_indices] # (num_modified, max_points, 2)
+        
+        # Create a mask to select only the valid, existing points for each batch
+        counts_expanded = torch.arange(self.max_points, device=self.device).expand(len(current_counts), -1)
+        existing_points_mask = counts_expanded < current_counts.unsqueeze(1)
+
+        # p1 is the new point, broadcasted
+        p1 = new_points.unsqueeze(1)
+        # p2 are all existing points
+        p2 = existing_points_full
+
+        # The third point on the line defined by p1 and p2
+        p3 = 2 * p2 - p1
+        
+        # Create a mask to filter out invalid/empty point slots from p2 and resulting p3
+        # We only care about p3's that are formed with valid p2's
+        p3_valid_mask = existing_points_mask
+
+        # Filter for p3's that are within the grid boundaries
+        in_bounds_mask = (p3 >= 0).all(dim=-1) & (p3 < self.N).all(dim=-1)
+        p3_valid_mask &= in_bounds_mask
+        
+        # Further filter: only consider p3's that land on an empty square
+        p3_coords_to_check = p3[p3_valid_mask].to(torch.int)
+        
+        # We need to map these back to their batch indices
+        batch_indices_expanded = batch_indices.unsqueeze(1).expand(-1, self.max_points)
+        p3_batch_indices = batch_indices_expanded[p3_valid_mask]
+
+        if p3_coords_to_check.numel() > 0:
+            occupancy = self.current_constructions[p3_batch_indices, p3_coords_to_check[:, 0], p3_coords_to_check[:, 1]]
+            is_empty_mask = (occupancy == 0)
+            
+            # Final set of points to mark as forbidden
+            forbidden_points = p3_coords_to_check[is_empty_mask]
+            forbidden_batch_indices = p3_batch_indices[is_empty_mask]
+
+            if forbidden_points.numel() > 0:
+                self.current_constructions[forbidden_batch_indices, forbidden_points[:, 0], forbidden_points[:, 1]] = -1
+
     def add_points(self, points):
         """
         Add points to constructions, updating internal state.
@@ -63,6 +134,7 @@ class NoThreeInLine:
         2. Group batches by their current number of points.
         3. In a vectorized way, for each group, update both the grid and point list.
         4. Increment point counts for batches where a point was added.
+        5. Proactively mark new forbidden squares resulting from the additions.
         
         Args:
             points: tensor of shape (batch_size, 2) with (x, y) coordinates.
@@ -99,6 +171,11 @@ class NoThreeInLine:
 
         added_point_counts = torch.zeros_like(self.current_counts)
 
+        # Keep track of which batches get insertions for the forbidden square update
+        all_batch_insertion_indices = []
+        all_points_to_add = []
+        all_initial_counts = []
+
         # Loop over unique counts for batched updates
         for cur_count in torch.unique(self.current_counts).tolist():
             count_mask = (self.current_counts == cur_count)
@@ -121,6 +198,20 @@ class NoThreeInLine:
             
             # Mark that we added a point to these batches
             added_point_counts[batch_insertion_indices] = 1
+
+            # Store the info needed for the forbidden square update
+            all_batch_insertion_indices.append(batch_insertion_indices)
+            all_points_to_add.append(points_to_add)
+            all_initial_counts.append(torch.full_like(batch_insertion_indices, cur_count, device=self.device))
+
+
+        # After all points are added, update the forbidden squares
+        if all_batch_insertion_indices:
+            self._update_forbidden_squares_after_add(
+                torch.cat(all_batch_insertion_indices),
+                torch.cat(all_points_to_add),
+                torch.cat(all_initial_counts)
+            )
 
         # Update the total counts
         self.current_counts += added_point_counts
@@ -631,12 +722,12 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 10
+    N = 15
     batch_size = 1000
 
     solver_batched = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
     t0 = time.time()
-    solver_batched.greedy_saturate_batched()
+    solver_batched.saturate()
     t1 = time.time()
 
     print(f"Saturation took {t1-t0:.2f} seconds.")
@@ -664,7 +755,7 @@ if __name__ == "__main__":
 
     solver_sequential = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
     t3 = time.time()
-    solver_sequential.greedy_saturate()
+    solver_sequential.greedy_saturate_batched()
     t4 = time.time()
     print(f"Saturation took {t4-t3:.2f} seconds.")
 
