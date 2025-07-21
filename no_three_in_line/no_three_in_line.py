@@ -12,6 +12,7 @@ class NoThreeInLine:
     grid_size: int  
     max_points: int
     device: str = "cpu"
+    aggressive_blocking: bool = False  # If True, blocks entire lines when points are placed
     
     def __post_init__(self):
         N = self.N = self.grid_size
@@ -53,6 +54,86 @@ class NoThreeInLine:
 
         # cache for pair indices used in collinearity checks
         self._pair_cache = {}
+
+    def _block_entire_lines(self, batch_indices, new_points):
+        """
+        Block entire lines (rows, columns, diagonals) only when there are already 
+        two points in that line, preventing three-in-line violations.
+        
+        Args:
+            batch_indices: 1D tensor of batch indices that were modified
+            new_points: 2D tensor (len(batch_indices), 2) of points that were just added
+        """
+        if batch_indices.numel() == 0:
+            return
+            
+        for i, batch_idx in enumerate(batch_indices):
+            x, y = new_points[i]
+            x, y = x.item(), y.item()
+            
+            # Check row - count existing points
+            row_count = torch.sum(self.current_constructions[batch_idx, x, :] == 1).item()
+            if row_count >= 2:  # Block entire row if 2+ points already exist
+                for col in range(self.N):
+                    if self.current_constructions[batch_idx, x, col] == 0:
+                        self.current_constructions[batch_idx, x, col] = -1
+            
+            # Check column - count existing points
+            col_count = torch.sum(self.current_constructions[batch_idx, :, y] == 1).item()
+            if col_count >= 2:  # Block entire column if 2+ points already exist
+                for row in range(self.N):
+                    if self.current_constructions[batch_idx, row, y] == 0:
+                        self.current_constructions[batch_idx, row, y] = -1
+            
+            # Check main diagonal (top-left to bottom-right)
+            # Find the starting point of the diagonal
+            start_x, start_y = x, y
+            while start_x > 0 and start_y > 0:
+                start_x -= 1
+                start_y -= 1
+            
+            # Count points on this diagonal
+            diag_count = 0
+            curr_x, curr_y = start_x, start_y
+            while curr_x < self.N and curr_y < self.N:
+                if self.current_constructions[batch_idx, curr_x, curr_y] == 1:
+                    diag_count += 1
+                curr_x += 1
+                curr_y += 1
+            
+            # Block the entire diagonal if 2+ points already exist
+            if diag_count >= 2:
+                curr_x, curr_y = start_x, start_y
+                while curr_x < self.N and curr_y < self.N:
+                    if self.current_constructions[batch_idx, curr_x, curr_y] == 0:
+                        self.current_constructions[batch_idx, curr_x, curr_y] = -1
+                    curr_x += 1
+                    curr_y += 1
+            
+            # Check anti-diagonal (top-right to bottom-left)
+            # Find the starting point of the anti-diagonal
+            start_x, start_y = x, y
+            while start_x > 0 and start_y < self.N - 1:
+                start_x -= 1
+                start_y += 1
+            
+            # Count points on this anti-diagonal
+            anti_diag_count = 0
+            curr_x, curr_y = start_x, start_y
+            while curr_x < self.N and curr_y >= 0:
+                if self.current_constructions[batch_idx, curr_x, curr_y] == 1:
+                    anti_diag_count += 1
+                curr_x += 1
+                curr_y -= 1
+            
+            # Block the entire anti-diagonal if 2+ points already exist
+            if anti_diag_count >= 2:
+                curr_x, curr_y = start_x, start_y
+                while curr_x < self.N and curr_y >= 0:
+                    if self.current_constructions[batch_idx, curr_x, curr_y] == 0:
+                        self.current_constructions[batch_idx, curr_x, curr_y] = -1
+                    curr_x += 1
+                    curr_y -= 1
 
     def _update_forbidden_squares_after_add(self, batch_indices, new_points, current_counts):
         """
@@ -207,11 +288,19 @@ class NoThreeInLine:
 
         # After all points are added, update the forbidden squares
         if all_batch_insertion_indices:
-            self._update_forbidden_squares_after_add(
-                torch.cat(all_batch_insertion_indices),
-                torch.cat(all_points_to_add),
-                torch.cat(all_initial_counts)
-            )
+            batch_indices_cat = torch.cat(all_batch_insertion_indices)
+            new_points_cat = torch.cat(all_points_to_add)
+            
+            if self.aggressive_blocking:
+                # Use the new aggressive method (entire lines blocked)
+                self._block_entire_lines(batch_indices_cat, new_points_cat)
+            else:
+                # Use the original method (individual forbidden squares)
+                self._update_forbidden_squares_after_add(
+                    batch_indices_cat,
+                    new_points_cat,
+                    torch.cat(all_initial_counts)
+                )
 
         # Update the total counts
         self.current_counts += added_point_counts
@@ -702,7 +791,7 @@ class NoThreeInLine:
         can_add = self.check_new_points(points.unsqueeze(1)).squeeze(1)
         points[~can_add] = self.null_tensor
         self.add_points(points)
-    
+
 
 def print_grid(construction_grid, title="Construction"):
     """Prints a 2D text representation of a single construction."""
@@ -715,6 +804,8 @@ def print_grid(construction_grid, title="Construction"):
         for c in range(N):
             if grid_list[r][c] == 1:
                 row_str.append('X')
+            elif grid_list[r][c] == -1:
+                row_str.append('-')
             else:
                 row_str.append('.')
         print(' '.join(row_str))
@@ -722,10 +813,10 @@ def print_grid(construction_grid, title="Construction"):
 
 if __name__ == "__main__":
 
-    N = 15
-    batch_size = 1000
+    N = 10
+    batch_size = 10000
 
-    solver_batched = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
+    solver_batched = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N, aggressive_blocking=True)
     t0 = time.time()
     solver_batched.saturate()
     t1 = time.time()
@@ -741,9 +832,6 @@ if __name__ == "__main__":
     points_counter_batched = Counter(solver_batched.current_counts.tolist())
     print(points_counter_batched)
 
-    
-    
-    
 
     # Find the best grid (highest number of points)
     best_idx_batched = torch.argmax(solver_batched.current_counts).item()
@@ -753,20 +841,20 @@ if __name__ == "__main__":
     print(f"\nBest construction has {best_count_batched} points:")
     print_grid(best_grid_batched, f"Best Grid ({best_count_batched} points)")
 
-    solver_sequential = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
-    t3 = time.time()
-    solver_sequential.greedy_saturate_batched()
-    t4 = time.time()
-    print(f"Saturation took {t4-t3:.2f} seconds.")
+    # solver_sequential = NoThreeInLine(batch_size=batch_size, grid_size=N, max_points=2*N)
+    # t3 = time.time()
+    # solver_sequential.greedy_saturate_batched()
+    # t4 = time.time()
+    # print(f"Saturation took {t4-t3:.2f} seconds.")
 
-    points_counter_sequential = Counter(solver_sequential.current_counts.tolist())
-    print(points_counter_sequential)
+    # points_counter_sequential = Counter(solver_sequential.current_counts.tolist())
+    # print(points_counter_sequential)
 
-    best_idx_sequential = torch.argmax(solver_sequential.current_counts).item()
-    best_grid_sequential = solver_sequential.current_constructions[best_idx_sequential]
-    best_count_sequential = solver_sequential.current_counts[best_idx_sequential].item()
+    # best_idx_sequential = torch.argmax(solver_sequential.current_counts).item()
+    # best_grid_sequential = solver_sequential.current_constructions[best_idx_sequential]
+    # best_count_sequential = solver_sequential.current_counts[best_idx_sequential].item()
 
-    print(f"\nBest construction has {best_count_sequential} points:")
-    print_grid(best_grid_sequential, f"Best Grid ({best_count_sequential} points)")
+    # print(f"\nBest construction has {best_count_sequential} points:")
+    # print_grid(best_grid_sequential, f"Best Grid ({best_count_sequential} points)")
 
-    print(f"Speedup: {t4-t3:.2f} / {t1-t0:.2f} = {((t4-t3)/(t1-t0)):.2f}x")
+    # print(f"Speedup: {t4-t3:.2f} / {t1-t0:.2f} = {((t4-t3)/(t1-t0)):.2f}x")

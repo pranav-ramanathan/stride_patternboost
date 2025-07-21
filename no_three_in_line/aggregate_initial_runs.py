@@ -1,67 +1,10 @@
 import os
 import argparse
 import logging
-import heapq
-import glob
 from collections import Counter
 
 from rich.logging import RichHandler
-
-# This TopPool class is adapted from gw_train_heap.py for standalone use.
-class TopPool:
-    """Maintain a fixed-capacity min-heap of the highest-scoring constructions."""
-
-    def __init__(self, capacity: int, grid_size: int):
-        self.capacity = capacity
-        self.heap: list[tuple[int, str]] = []  # (score, token_string)
-        self.perfect_score = 2 * grid_size
-
-    def _push(self, score: int, token_string: str):
-        heapq.heappush(self.heap, (score, token_string))
-
-    def _pop(self):
-        score, token_string = heapq.heappop(self.heap)
-        return score, token_string
-
-    def add(self, score: int, token_string: str):
-        """
-        Attempt to add construction; keep only if it improves the pool.
-        """
-        if len(self.heap) < self.capacity:
-            self._push(score, token_string)
-        elif score > self.heap[0][0]:
-            self._pop()
-            self._push(score, token_string)
-
-    def build_from_file(self, path: str, logger: logging.Logger):
-        if not os.path.isfile(path):
-            logger.warning(f"Input file not found: {path}")
-            return
-        
-        with open(path, "r") as f:
-            for line_num, line in enumerate(f):
-                line = line.strip()
-                if not line:
-                    continue
-                
-                score = len(line.split(','))
-
-                # Defensively skip adding constructions that are too large
-                if score > self.perfect_score * 2:
-                    logger.warning(f"Skipping corrupt line {line_num+1} in {path} (score {score} is too high)")
-                    continue
-
-                self.add(score, line)
-
-    def dump_to_file(self, path: str):
-        # Sorting removed for performance as it is not functionally required.
-        with open(path, "w") as f:
-            for _score, token_str in self.heap:
-                f.write(token_str + "\n")
-
-    def __len__(self):
-        return len(self.heap)
-
+from utils.top_pool import TopPool
 
 def get_parser():
     parser = argparse.ArgumentParser(description="Aggregate multiple initial generation runs into a single top pool.")
@@ -85,7 +28,7 @@ if __name__ == "__main__":
     logger = setup_logging()
 
     logger.info("Initializing Top Pool...")
-    pool = TopPool(capacity=args.pool_capacity, grid_size=args.grid_size)
+    pool = TopPool(capacity=args.pool_capacity, grid_size=args.grid_size, logger=logger)
     
     base_path = os.path.join(args.dump_path, "training_sets")
     logger.info(f"Looking for job outputs in: {base_path}")
@@ -106,7 +49,7 @@ if __name__ == "__main__":
 
     for file_path in input_files:
         logger.info(f"Processing file: {file_path}")
-        pool.build_from_file(file_path, logger)
+        pool.build_from_file(file_path)
 
     logger.info(f"Aggregation complete. Final pool size: {len(pool)}")
     if pool:
