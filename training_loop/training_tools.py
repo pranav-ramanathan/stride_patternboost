@@ -79,8 +79,11 @@ def create_datasets_from_file(input_file: str, args: argparse.Namespace,
     Loads constructions from a file and creates train/test datasets.
     If args.symmetrize is True, it generates all symmetries on the fly.
     """
-    with open(input_file, "r") as f:
-        lines = [ln.strip() for ln in f.readlines() if ln.strip()]
+    # Load top constructions up to target_training_size using TopPool (pick best by score)
+    pool = TopPool(capacity=args.target_training_size, grid_size=args.grid_size, logger=logger)
+    pool.build_from_file(input_file)
+    lines = [token_str for _, token_str in pool.heap]
+    logger.info(f"Selected {len(lines)} top constructions using TopPool (capacity={args.target_training_size}).")
 
     if args.symmetrize:
         words = []

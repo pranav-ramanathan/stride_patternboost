@@ -11,6 +11,7 @@ class TopPool:
         self.heap: list[tuple[int, str]] = []  # (score, token_string)
         self.perfect_score = 2 * grid_size
         self.logger = logger
+        self.added_count = 0  # count of constructions added or replaced
 
     # internal ---------------------------------------------------------------
     def _push(self, score: int, token_string: str):
@@ -30,15 +31,14 @@ class TopPool:
         # to prevent bugs related to invalid grids being classified as "perfect".
         # The heap now has a strictly fixed capacity.
 
+        # Add new or replace worst if better; count additions without per-item logs
         if len(self.heap) < self.capacity:
-            if self.logger:
-                self.logger.info(f"Pool below capacity. Adding new construction with score {score}.")
             self._push(score, token_string)
-        elif score > self.heap[0][0]:  # If score is strictly better, replace the worst
-            popped_score, _ = self._pop()
-            if self.logger:
-                self.logger.info(f"New score {score} > worst in heap {popped_score}. Replacing.")
+            self.added_count += 1
+        elif score > self.heap[0][0]:  # replace worst
+            self._pop()
             self._push(score, token_string)
+            self.added_count += 1
 
     def build_from_file(self, path: str):
         if not os.path.isfile(path):
@@ -60,7 +60,10 @@ class TopPool:
                 self.add(score, line)
 
     def dump_to_file(self, path: str):
-        # Sorting removed for performance as it is not functionally required.
+        # Summary of additions
+        if self.logger:
+            self.logger.info(f"Added {self.added_count} best constructions to pool (capacity={self.capacity}).")
+        # Dump heap to file
         with open(path, "w") as f:
             for _score, token_str in self.heap:
                 f.write(token_str + "\n")

@@ -34,7 +34,7 @@ def get_parser():
 
     # generation / selection -------------------------------------------------
     parser.add_argument("--batch_size", type=int, default=500)
-    parser.add_argument("--keep_best_fraction", type=float, default=0.1)
+    parser.add_argument("--keep_best_fraction", type=float, default=1.0)
     parser.add_argument("--symmetrize", action=argparse.BooleanOptionalAction, default=True,
                         help="Generate all 8 symmetries of selected constructions (default on)")
 
@@ -140,7 +140,9 @@ if __name__ == "__main__":
                 best_loss = te_loss
         
         optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-        loader = InfiniteDataLoader(train_ds, batch_size=args.nn_batch_size, pin_memory=True, num_workers=args.num_workers)
+        # disable pin_memory on MPS to avoid unsupported pinning
+        use_pin_memory = args.device != 'mps'
+        loader = InfiniteDataLoader(train_ds, batch_size=args.nn_batch_size, pin_memory=use_pin_memory, num_workers=args.num_workers)
 
         model.train()  # Ensure model is in training mode
         for step in range(args.max_steps + 1):
@@ -186,4 +188,4 @@ if __name__ == "__main__":
         logger.info(f"=========== End of generation {gen + 1} ===========")
 
     logger.info("All generations completed!")
-    logger.info(f"Total time: {time.time() - start:.2f} seconds") 
+    logger.info(f"Total time: {time.time() - start:.2f} seconds")

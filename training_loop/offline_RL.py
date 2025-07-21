@@ -103,51 +103,44 @@ def set_device(args, logger):
 # -----------------------------------------------------------------------------
 # Utility – compute RTG tensor on the fly -------------------------------------
 # -----------------------------------------------------------------------------
-
-def make_rtg_tensor(batch_size: int, seq_len: int, max_points: int, device: str):
-    """Return-to-go = how many more valid points we want to place.
+def make_rtg_tensor_from_scores(final_scores, seq_len, device):
+    """Create RTG tensor from actual final scores of trajectories.
     
-    For no-three-in-line, RTG should represent the target number of points
-    we want to achieve, decreasing as we place valid points.
-    
-    This creates RTG values that start at max_points and decrease linearly.
+    RTG = target final score (constant throughout the sequence).
+    This teaches the model to condition on the desired outcome.
     """
-    # Create decreasing RTG values: [max_points, max_points-1, ..., 1, 0, 0, ...]
-    rtg_values = torch.arange(seq_len, device=device)
-    rtg = (max_points - rtg_values).clamp(min=0).float()
-    rtg = rtg.unsqueeze(0).repeat(batch_size, 1)
-    
+    batch_size = len(final_scores)
+    scores_tensor = torch.tensor(final_scores, device=device, dtype=torch.float)
+    rtg = scores_tensor.unsqueeze(1).repeat(1, seq_len)
     return rtg
 
-def make_rewards_from_rtg(rtg: torch.FloatTensor, max_points: int) -> torch.FloatTensor:
-    """Convert RTG values to rewards for loss weighting.
+def make_rewards_from_scores(final_scores, seq_len, max_points, device):
+    """Create reward weights based on actual trajectory quality."""
+    batch_size = len(final_scores)
+    scores_tensor = torch.tensor(final_scores, device=device, dtype=torch.float)
     
-    For the no-three-in-line problem, we want to weight learning from 
-    trajectories that achieve higher scores. We can weight based on the
-    remaining target points - higher RTG means we're aiming for more points.
+    # Normalize scores to [0, 1] and emphasize high scores heavily
+    normalized_scores = scores_tensor / max_points
+    rewards = torch.pow(normalized_scores, 2.0)  # Square to heavily weight high-scoring trajectories
     
-    Args:
-        rtg: Return-to-go tensor of shape (B, T)
-        max_points: Maximum possible points in the problem
-        
-    Returns:
-        rewards: Reward weights of shape (B, T) in [0, 1] range
-    """
-    # Normalize RTG to [0, 1] range
-    normalized_rtg = rtg / max_points
-    
-    # Weight by RTG: higher RTG (aiming for more points) gets higher weight
-    # Use square root to not over-emphasize the differences
-    rewards = torch.pow(normalized_rtg, 0.5)
-    
-    # Alternative: you could also weight by trajectory quality
-    # This would require knowing the final score of each trajectory
-    
+    # Expand to sequence length
+    rewards = rewards.unsqueeze(1).repeat(1, seq_len)
     return rewards
 
-def evaluate_dt(model, dataset, device, batch_size=50, max_batches=None, 
-                make_rtg=None, use_reward_weighting=False, max_points=30, num_workers=0):
-    """Custom evaluation function for Decision Transformer that handles RTG values."""
+def make_high_target_rtg(batch_size, seq_len, min_target, max_target, device):
+    """Create RTG tensor with high target scores for generation."""
+    # Sample target scores from high range (e.g., 28-30)
+    target_scores = torch.randint(min_target, max_target + 1, (batch_size,), dtype=torch.float, device=device)
+    rtg = target_scores.unsqueeze(1).repeat(1, seq_len)
+    return rtg
+
+# -----------------------------------------------------------------------------
+# Improved Evaluation Function -----------------------------------------------
+# -----------------------------------------------------------------------------
+
+def evaluate_dt_with_scores(model, dataset, device, batch_size=50, max_batches=None, 
+                           use_reward_weighting=False, max_points=30, num_workers=0):
+    """Evaluation function that uses actual final scores for RTG."""
     from torch.utils.data import DataLoader
     
     model.eval()
@@ -162,15 +155,19 @@ def evaluate_dt(model, dataset, device, batch_size=50, max_batches=None,
             batch = [t.to(device) for t in batch]
             X, Y = batch
             
-            # Create RTG tensor
-            if make_rtg is not None:
-                rtg = make_rtg(X.size(0), X.size(1), max_points, device)
-            else:
-                rtg = make_rtg_tensor(X.size(0), X.size(1), max_points, device)
+            # Infer final scores from the sequences (count non-padding tokens)
+            final_scores = []
+            for seq in X:
+                # Count tokens until we hit padding (0) or end
+                non_zero_tokens = (seq[1:] > 0).sum().item()  # Skip start token
+                final_scores.append(min(non_zero_tokens, max_points))
             
-            # Create rewards for evaluation (use same loss function as training)
+            # Create RTG based on actual final scores
+            rtg = make_rtg_tensor_from_scores(final_scores, X.size(1), device)
+            
+            # Create rewards for evaluation if using reward weighting
             if use_reward_weighting:
-                rewards = make_rewards_from_rtg(rtg, max_points)
+                rewards = make_rewards_from_scores(final_scores, X.size(1), max_points, device)
             else:
                 rewards = None
             
@@ -179,21 +176,103 @@ def evaluate_dt(model, dataset, device, batch_size=50, max_batches=None,
             losses.append(loss.item())
     
     mean_loss = torch.tensor(losses).mean().item()
-    model.train()  # reset model back to training mode
+    model.train()
     return mean_loss
 
 # -----------------------------------------------------------------------------
-# (The dataset loading, symmetrization, pool logic, etc. remain identical to
-# the original script – paste or import them here to keep file compact.)
-# For brevity, we assume `create_datasets_from_file`, `generate_samples`,
-# `decode_and_update_pool`, etc. are imported from the original SFT module or
-# duplicated verbatim below. ---------------------------------------------------
+# Improved Generation Function -----------------------------------------------
 # -----------------------------------------------------------------------------
 
-
+def generate_samples_dt(model, train_dataset, args, num_samples, max_points):
+    """Generate samples conditioned on high target scores."""
+    # Use high target scores to encourage better constructions
+    min_target = max(25, int(0.8 * max_points))  # Start from ~80% of max
+    target_scores = torch.randint(min_target, max_points + 1, (num_samples,), dtype=torch.float).to(args.device)
+    
+    X_init = torch.zeros(num_samples, 1, dtype=torch.long).to(args.device)
+    steps = train_dataset.get_output_length() - 1
+    
+    with torch.no_grad():
+        model.eval()
+        tokens = X_init
+        rtg = target_scores.unsqueeze(1)  # Shape: (batch_size, 1)
+        
+        for step in range(steps):
+            # Crop context if necessary
+            tokens_cond = tokens[:, -model.block_size:] if tokens.size(1) > model.block_size else tokens
+            rtg_cond = rtg[:, -model.block_size:] if rtg.size(1) > model.block_size else rtg
+            
+            # Get logits
+            logits, _, _ = model(tokens_cond, rtg_cond)
+            next_token_logits = logits[:, -1, :]
+            
+            # Apply temperature and top_k sampling
+            if hasattr(args, 'temperature') and args.temperature > 0:
+                next_token_logits = next_token_logits / args.temperature
+                if hasattr(args, 'top_k') and args.top_k > 0:
+                    v, _ = torch.topk(next_token_logits, args.top_k)
+                    next_token_logits[next_token_logits < v[:, [-1]]] = float('-inf')
+                probs = torch.softmax(next_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            
+            # Append token
+            tokens = torch.cat([tokens, next_token], dim=1)
+            
+            # RTG stays constant (target score doesn't change during generation)
+            rtg = torch.cat([rtg, target_scores.unsqueeze(1)], dim=1)
+            
+            # Stop if all sequences hit end token
+            if (next_token == 0).all():
+                break
+    
+    # Process generated tokens
+    X_samp = tokens.cpu()
+    all_tokens = []
+    
+    for i in range(X_samp.size(0)):
+        row = X_samp[i, 1:].tolist()  # Skip start token
+        crop = row.index(0) if 0 in row else len(row)
+        if crop > 0:  # Only process non-empty sequences
+            decoded_str = train_dataset.decode(row[:crop])
+            tokens = [int(t[1:]) for t in decoded_str.split(',') if t]
+            if tokens:
+                all_tokens.append(tokens)
+    
+    return all_tokens
 
 # -----------------------------------------------------------------------------
-# Main ------------------------------------------------------------------------
+# Modified Training Loop with Score-Based RTG --------------------------------
+# -----------------------------------------------------------------------------
+
+class ScoreAwareInfiniteDataLoader:
+    """DataLoader that provides batches with score information."""
+    
+    def __init__(self, dataset, max_points, **kwargs):
+        self.dataset = dataset
+        self.max_points = max_points
+        self.loader = InfiniteDataLoader(dataset, **kwargs)
+        
+    def __iter__(self):
+        return self
+        
+    def __next__(self):
+        X, Y = next(self.loader)
+        
+        # Infer final scores from sequences
+        final_scores = []
+        for seq in X:
+            non_zero_tokens = (seq[1:] > 0).sum().item()  # Skip start token, count real tokens
+            final_scores.append(min(non_zero_tokens, self.max_points))
+        
+        return X, Y, final_scores
+    
+    def shutdown(self):
+        self.loader.shutdown()
+
+# -----------------------------------------------------------------------------
+# Main Function ---------------------------------------------------------------
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -256,62 +335,60 @@ if __name__ == "__main__":
 
         model = DecisionTransformer(vocab_size=cfg.vocab_size, config=cfg).to(args.device)
         
-        # Load from SFT model.pt FIRST, then check for existing DT model
-# Load from existing DT model FIRST, then fall back to SFT model
+        # --- Model Loading (Fixed to prioritize DT model) ---------------
         sft_model_path = os.path.join(args.dump_path, "model.pt")
         dt_model_path = os.path.join(args.dump_path, "model_dt.pt")
-
+        
         if os.path.isfile(dt_model_path):
-            # Resume from existing DT model (prioritize this)
+            # Resume from existing DT model (prioritize this!)
             model.load_state_dict(torch.load(dt_model_path, map_location=args.device))
             logger.info("Resumed existing Decision Transformer model.")
             
         elif os.path.isfile(sft_model_path):
-            # Load SFT model weights and convert to DT format (only if no DT model exists)
+            # Load SFT model weights and convert to DT format
             sft_state_dict = torch.load(sft_model_path, map_location=args.device)
             
-            # Extract transformer weights from SFT model
             dt_state_dict = {}
             for key, value in sft_state_dict.items():
-                if key.startswith('transformer.'):
-                    dt_state_dict[key] = value
-                elif key.startswith('lm_head.'):
+                if key.startswith('transformer.') or key.startswith('lm_head.'):
                     dt_state_dict[key] = value
             
-            # Load compatible weights into DT model
             model.load_state_dict(dt_state_dict, strict=False)
             logger.info("Loaded SFT model weights into Decision Transformer.")
             
         else:
             logger.info("No existing model found. Training Decision Transformer from scratch.")
 
-        # Set initial best_loss only once at the very beginning
+        # Set initial best_loss only at the beginning
         if best_loss is None:
-            te_loss = evaluate_dt(model, test_ds, args.device, batch_size=50, max_batches=20,
-                            make_rtg=make_rtg_tensor, use_reward_weighting=args.use_reward_weighting, 
-                            max_points=args.max_points, num_workers=args.num_workers)
+            te_loss = evaluate_dt_with_scores(model, test_ds, args.device, batch_size=50, max_batches=20,
+                                            use_reward_weighting=args.use_reward_weighting, 
+                                            max_points=args.max_points, num_workers=args.num_workers)
             best_loss = te_loss
             logger.info(f"Initial best_loss set to {te_loss:.4f}")
+
+        # --- Training Setup -----------------------------------------------
         optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-        # Disable pin_memory for MPS to avoid warnings
         use_pin_memory = args.device not in ["mps"]
-        loader = InfiniteDataLoader(train_ds, batch_size=args.nn_batch_size, pin_memory=use_pin_memory, num_workers=args.num_workers)
+        loader = ScoreAwareInfiniteDataLoader(train_ds, args.max_points, 
+                                            batch_size=args.nn_batch_size, 
+                                            pin_memory=use_pin_memory, 
+                                            num_workers=args.num_workers)
 
-        # Log training configuration
         logger.info(f"Training with reward weighting: {args.use_reward_weighting}")
-        if args.use_reward_weighting:
-            logger.info("Using reward-weighted loss to focus on high-reward trajectories")
-        else:
-            logger.info("Using standard cross-entropy loss")
+        logger.info(f"Using score-based RTG conditioning")
 
-        # --- training -----------------------------------------------------
+        # --- Training Loop ------------------------------------------------
         for step in range(args.max_steps + 1):
-            X, Y = [t.to(args.device) for t in next(loader)]
-            rtg = make_rtg_tensor(X.size(0), X.size(1), args.max_points, args.device)
+            X, Y, final_scores = next(loader)
+            X, Y = X.to(args.device), Y.to(args.device)
             
-            # Use reward weighting if enabled
+            # Create RTG from actual final scores
+            rtg = make_rtg_tensor_from_scores(final_scores, X.size(1), args.device)
+            
+            # Create rewards if using reward weighting
             if args.use_reward_weighting:
-                rewards = make_rewards_from_rtg(rtg, args.max_points)
+                rewards = make_rewards_from_scores(final_scores, X.size(1), args.max_points, args.device)
             else:
                 rewards = None
                 
@@ -319,25 +396,33 @@ if __name__ == "__main__":
             model.zero_grad(set_to_none=True)
             loss.backward()
             optim.step()
+            
             if step % 100 == 0:
-                logger.info(f"step {step} | loss {loss.item():.4f}")
+                avg_score = np.mean(final_scores)
+                logger.info(f"step {step} | loss {loss.item():.4f} | avg_score {avg_score:.1f}")
+                
             if step and step % 500 == 0:
-                tr_loss = evaluate_dt(model, train_ds, args.device, batch_size=50, max_batches=10,
-                                   make_rtg=make_rtg_tensor, use_reward_weighting=args.use_reward_weighting, 
-                                   max_points=args.max_points, num_workers=args.num_workers)
-                te_loss = evaluate_dt(model, test_ds, args.device, batch_size=50, max_batches=10,
-                                   make_rtg=make_rtg_tensor, use_reward_weighting=args.use_reward_weighting, 
-                                   max_points=args.max_points, num_workers=args.num_workers)
+                tr_loss = evaluate_dt_with_scores(model, train_ds, args.device, batch_size=50, max_batches=10,
+                                                use_reward_weighting=args.use_reward_weighting, 
+                                                max_points=args.max_points, num_workers=args.num_workers)
+                te_loss = evaluate_dt_with_scores(model, test_ds, args.device, batch_size=50, max_batches=10,
+                                                use_reward_weighting=args.use_reward_weighting, 
+                                                max_points=args.max_points, num_workers=args.num_workers)
                 logger.info(f"step {step} train {tr_loss:.4f} test {te_loss:.4f}")
+                
                 if best_loss is None or te_loss < best_loss:
                     logger.info("best test loss improved; saving model to model_dt.pt")
                     torch.save(model.state_dict(), dt_model_path)
                     best_loss = te_loss
+                    
         loader.shutdown()
 
-        # --- sampling -----------------------------------------------------
+        # --- Sampling with High Targets ----------------------------------
         total_to_generate = int(args.target_training_size * (1 / args.keep_best_fraction))
         all_samples = []
+        
+        logger.info(f"Generating {total_to_generate} samples with target scores {max(25, int(0.8 * args.max_points))}-{args.max_points}")
+        
         with Progress(TextColumn("[progress.description]{task.description}"), BarColumn(), MofNCompleteColumn(), TimeRemainingColumn()) as prog:
             t = prog.add_task("Generating samples", total=total_to_generate)
             done = 0
@@ -350,11 +435,12 @@ if __name__ == "__main__":
                 done += n
                 prog.update(t, advance=n)
 
-        # --- decode & update pool ----------------------------------------
+        # --- Pool Update --------------------------------------------------
         if args.device == "cuda":
             torch.cuda.empty_cache()
         elif args.device == "mps":
-            torch.mps.synchronize()  # MPS doesn't have empty_cache()
+            torch.mps.synchronize()
+            
         decode_and_update_pool(args, token_decoding, token_encoding, gen + 1, logger, pool, all_samples)
         logger.info(f"=========== End of generation {gen + 1} ===========")
 

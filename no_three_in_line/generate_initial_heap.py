@@ -16,7 +16,7 @@ def get_parser():
     parser.add_argument('--batch_size', type=int, default=500, help='Generate and process samples in batches of this size')
     parser.add_argument('--max_points', type=int, default=18, help='Max points which can be added to a construction')
     parser.add_argument('--target_training_size', type=int, default=20000, help='Number of examples to aim for')
-    parser.add_argument('--keep_best_fraction', type=float, default=0.1, help='Percentage of good constructions to keep from each batch')
+    parser.add_argument('--keep_best_fraction', type=float, default=1.0, help='Percentage of good constructions to keep from each batch')
 
     parser.add_argument('--seed', type=int, default=-1, help='Random seed; -1 for random')
     parser.add_argument('--dump_path', type=str, default='dump_path', help='Experiment dump directory (inside training/)')
