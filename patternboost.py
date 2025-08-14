@@ -13,7 +13,7 @@ from models import (
 
 from utils import TopPool
 
-from .training_tools import (
+from training_tools import (
     setup_logging,
     set_device,
     create_datasets_from_file,

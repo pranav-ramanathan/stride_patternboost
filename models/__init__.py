@@ -5,7 +5,6 @@ __all__ = [
     
     # Model classes
     "Transformer",
-    "DecisionTransformer",
     "BoW", 
     "RNN",
     "MLP",
@@ -66,6 +65,4 @@ from .makemoretokens import (
     logprobs,
     create_datasets,
     create_eval_dataset,
-) 
-
-from .DT import DecisionTransformer
+)
