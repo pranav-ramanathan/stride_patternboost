@@ -140,63 +140,6 @@ def generate_samples(model, train_dataset, args, num_samples):
             all_tokens.append(tokens)
     return all_tokens
 
-def generate_samples_dt(model, train_dataset, args, num_samples, max_points):
-    """Generates samples from a Decision Transformer model and returns them as a list of token lists."""
-    # For Decision Transformer, we need to provide RTG (return-to-go) values
-    # Start with maximum RTG (max_points) and generate tokens
-    X_init = torch.zeros(num_samples, 1, dtype=torch.long).to(args.device)
-    rtg_init = torch.full((num_samples, 1), max_points, dtype=torch.float).to(args.device)
-    
-    steps = train_dataset.get_output_length() - 1
-    
-    # Use the Decision Transformer's generate method with proper RTG updates
-    with torch.no_grad():
-        model.eval()
-        tokens = X_init
-        rtg = rtg_init
-        
-        for _ in range(steps):
-            # Crop context if necessary
-            tokens_cond = tokens[:, -model.block_size:] if tokens.size(1) > model.block_size else tokens
-            rtg_cond = rtg[:, -model.block_size:] if rtg.size(1) > model.block_size else rtg
-            
-            # Get next token
-            logits, _, _ = model(tokens_cond, rtg_cond)
-            next_token_logits = logits[:, -1, :]
-            
-            # Sample or take argmax
-            if hasattr(args, 'temperature') and args.temperature > 0:
-                next_token_logits = next_token_logits / args.temperature
-                if hasattr(args, 'top_k') and args.top_k > 0:
-                    v, _ = torch.topk(next_token_logits, args.top_k)
-                    next_token_logits[next_token_logits < v[:, [-1]]] = float('-inf')
-                probs = torch.softmax(next_token_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            
-            tokens = torch.cat([tokens, next_token], dim=1)
-            
-            # Update RTG: decrease by 1 for valid tokens, stay same for padding (token 0)
-            next_rtg = torch.where(next_token == 0, rtg[:, -1:], torch.clamp(rtg[:, -1:] - 1, min=0))
-            rtg = torch.cat([rtg, next_rtg], dim=1)
-            
-            # Stop if all sequences hit the end token
-            if (next_token == 0).all():
-                break
-    
-    X_samp = tokens.cpu()
-    
-    all_tokens = []
-    for i in range(X_samp.size(0)):
-        row = X_samp[i, 1:].tolist()  # Skip the initial token
-        crop = row.index(0) if 0 in row else len(row)
-        # Decode to token strings like "V12", then strip "V" and convert to int
-        decoded_str = train_dataset.decode(row[:crop])
-        tokens = [int(t[1:]) for t in decoded_str.split(',') if t]
-        if tokens:
-            all_tokens.append(tokens)
-    return all_tokens
 
 def format_grid(construction_tensor: torch.Tensor) -> str:
     """Formats a 2D tensor construction into a printable grid string."""
