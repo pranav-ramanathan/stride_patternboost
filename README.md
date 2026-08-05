@@ -12,7 +12,7 @@ The project's goal is to provide mathematicians with an accessible tool that bal
 ## Installation
 
 ### Prerequisites
-- Python 3.10+
+- Python 3.12+
 - Julia 1.8+
 
 ### Setup
@@ -32,6 +32,30 @@ python fc_loop.py
 
 ## Contributing
 Feel free to explore other problems or propose extensions to the PatternBoost algorithm!
+
+## Fixed-timeout run results
+
+The four-seed fixed-timeout results used in the manuscript are committed under
+[results/fixed_timeout_seed0_3/](results/fixed_timeout_seed0_3/). The protocol
+covers grid sizes n=10..19, seeds 0..3, and a 120-minute timeout per
+method/grid/seed run.
+
+For the PatternBoost results:
+
+- raw/patternboost_seed*_part*.csv contains the source summaries. Seed 0 has
+  two source parts.
+- aggregate.csv contains the cross-method summary; inspect the pb_* columns
+  for this repository.
+- long.csv contains one normalized record per method, seed, and grid size.
+- manifest.json records source paths and SHA-256 hashes.
+- validation.md records the validation checks and known timeout anomaly.
+
+For example:
+
+~~~bash
+column -s, -t < results/fixed_timeout_seed0_3/aggregate.csv
+less results/fixed_timeout_seed0_3/raw/patternboost_seed1_part1.csv
+~~~
 
 ## Apple Silicon Support
 
