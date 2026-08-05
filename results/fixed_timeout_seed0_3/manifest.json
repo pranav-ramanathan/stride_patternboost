@@ -1,0 +1,128 @@
+{
+  "description": "Canonical fixed-timeout inputs for the four-run seeds 0-3 analysis.",
+  "grid_sizes": [
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "seeds": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sources": [
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ilp_seed0_part1.csv",
+      "bundled_sha256": "6c7dc5a666a75547dba23630efe02311b3692616310fc7d863e670613f568aa2",
+      "method": "ilp",
+      "path": "fixed_timeout_runs/ilp/20260630_083954/ilp_summary.csv",
+      "seed": 0,
+      "sha256": "6c7dc5a666a75547dba23630efe02311b3692616310fc7d863e670613f568aa2"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ilp_seed1_part1.csv",
+      "bundled_sha256": "e7695241cd4533f9e766cf8ba695ae58791053f211e0a9e476a04ed8c94085ef",
+      "method": "ilp",
+      "path": "fixed_timeout_runs/ilp/20260630_114424/ilp_summary.csv",
+      "seed": 1,
+      "sha256": "e7695241cd4533f9e766cf8ba695ae58791053f211e0a9e476a04ed8c94085ef"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ilp_seed2_part1.csv",
+      "bundled_sha256": "e20d91152fd338779cfec4949352b1b3ff18f075b4db295388afa44d466f44ee",
+      "method": "ilp",
+      "path": "fixed_timeout_runs/ilp/20260630_151526/ilp_summary.csv",
+      "seed": 2,
+      "sha256": "e20d91152fd338779cfec4949352b1b3ff18f075b4db295388afa44d466f44ee"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ilp_seed3_part1.csv",
+      "bundled_sha256": "27a78ae8db229a54b8b149c42c72ff51422ffe48c884688e72dcd70ad5f52cec",
+      "method": "ilp",
+      "path": "fixed_timeout_runs/ilp/20260702_174144/ilp_summary.csv",
+      "seed": 3,
+      "sha256": "27a78ae8db229a54b8b149c42c72ff51422ffe48c884688e72dcd70ad5f52cec"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/patternboost_seed0_part1.csv",
+      "bundled_sha256": "082819d6c5cbba70f77f981968f7b4192b94d78fdb34aefacefde59941f95e98",
+      "method": "patternboost",
+      "path": "fixed_timeout_runs/patternboost/20260625_084012/patternboost_summary.csv",
+      "seed": 0,
+      "sha256": "082819d6c5cbba70f77f981968f7b4192b94d78fdb34aefacefde59941f95e98"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/patternboost_seed0_part2.csv",
+      "bundled_sha256": "24b2cee8ea97534e93e3afe5f79c49b9d73dfa2efee617c36fd1bf1387f14137",
+      "method": "patternboost",
+      "path": "fixed_timeout_runs/patternboost/20260625_222420/patternboost_summary.csv",
+      "seed": 0,
+      "sha256": "24b2cee8ea97534e93e3afe5f79c49b9d73dfa2efee617c36fd1bf1387f14137"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/patternboost_seed1_part1.csv",
+      "bundled_sha256": "8db1690ab13f10fb773eac4e0da5298089680d022d5c4774ccf2edd5f04ce592",
+      "method": "patternboost",
+      "path": "fixed_timeout_runs/patternboost/20260630_200749/patternboost_summary.csv",
+      "seed": 1,
+      "sha256": "8db1690ab13f10fb773eac4e0da5298089680d022d5c4774ccf2edd5f04ce592"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/patternboost_seed2_part1.csv",
+      "bundled_sha256": "994646db8594a65271e839c137cede54375568148c0d06fe71bee67e9318b2d7",
+      "method": "patternboost",
+      "path": "fixed_timeout_runs/patternboost/20260701_104255/patternboost_summary.csv",
+      "seed": 2,
+      "sha256": "994646db8594a65271e839c137cede54375568148c0d06fe71bee67e9318b2d7"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/patternboost_seed3_part1.csv",
+      "bundled_sha256": "2cff000bf2a92d71890e015ad545e0afc79aa71a24370182fdc46a50ae62d0e6",
+      "method": "patternboost",
+      "path": "fixed_timeout_runs/patternboost/20260702_012952/patternboost_summary.csv",
+      "seed": 3,
+      "sha256": "2cff000bf2a92d71890e015ad545e0afc79aa71a24370182fdc46a50ae62d0e6"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ppo_seed0_part1.csv",
+      "bundled_sha256": "fe1184693a0e054500fea0651824bce30da0609c5baa50a198a80fe7a512f644",
+      "method": "ppo",
+      "path": "fixed_timeout_runs/ppo/20260623_184959/ppo_summary.csv",
+      "seed": 0,
+      "sha256": "fe1184693a0e054500fea0651824bce30da0609c5baa50a198a80fe7a512f644"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ppo_seed1_part1.csv",
+      "bundled_sha256": "0465b44016078791ccf4cf73e53fe9ce7441d34fec3d09d72ed35d2db8b31d68",
+      "method": "ppo",
+      "path": "fixed_timeout_runs/ppo/20260703_231114/ppo_summary.csv",
+      "seed": 1,
+      "sha256": "0465b44016078791ccf4cf73e53fe9ce7441d34fec3d09d72ed35d2db8b31d68"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ppo_seed2_part1.csv",
+      "bundled_sha256": "7f46b6dac7309306900fa2a7a21a54d1b9d68ec3f010c5aec58403f6532df5f7",
+      "method": "ppo",
+      "path": "fixed_timeout_runs/ppo/20260704_234925/ppo_summary.csv",
+      "seed": 2,
+      "sha256": "7f46b6dac7309306900fa2a7a21a54d1b9d68ec3f010c5aec58403f6532df5f7"
+    },
+    {
+      "bundled_path": "outputs/fixed_timeout_seed0_3_raw/ppo_seed3_part1.csv",
+      "bundled_sha256": "a9cc392f20109e46f2e7253a0a12565f512f59b88f7830603f0227e14ba7732d",
+      "method": "ppo",
+      "path": "fixed_timeout_runs/ppo/20260705_194928/ppo_summary.csv",
+      "seed": 3,
+      "sha256": "a9cc392f20109e46f2e7253a0a12565f512f59b88f7830603f0227e14ba7732d"
+    }
+  ],
+  "timeout_minutes": 120.0
+}
